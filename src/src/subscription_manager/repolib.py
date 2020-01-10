@@ -16,11 +16,14 @@
 # in this software or its documentation.
 #
 
+# TODO: cleanup config parser imports
+from ConfigParser import Error as ConfigParserError
 import gettext
 from iniparse import RawConfigParser as ConfigParser
 import logging
 import os
 import string
+import socket
 import subscription_manager.injection as inj
 from subscription_manager.cache import OverrideStatusCache, WrittenOverrideCache
 from subscription_manager import utils
@@ -41,6 +44,23 @@ CFG = initConfig()
 ALLOWED_CONTENT_TYPES = ["yum"]
 
 _ = gettext.gettext
+
+
+def manage_repos_enabled():
+    manage_repos = True
+    try:
+        manage_repos = CFG.get_int('rhsm', 'manage_repos')
+    except ValueError, e:
+        log.exception(e)
+        return True
+    except ConfigParserError, e:
+        log.exception(e)
+        return True
+
+    if manage_repos is None:
+        return True
+
+    return bool(manage_repos)
 
 
 class RepoActionInvoker(BaseActionInvoker):
@@ -190,12 +210,17 @@ class RepoUpdateActionCommand(object):
 
         self.manage_repos = 1
         self.apply_overrides = apply_overrides
-        if CFG.has_option('rhsm', 'manage_repos'):
-            self.manage_repos = int(CFG.get('rhsm', 'manage_repos'))
+        self.manage_repos = manage_repos_enabled()
 
         self.release = None
         self.overrides = {}
-        self.override_supported = bool(self.identity.is_valid() and self.uep and self.uep.supports_resource('content_overrides'))
+        self.override_supported = False
+        try:
+            self.override_supported = bool(self.identity.is_valid() and self.uep and self.uep.supports_resource('content_overrides'))
+        except socket.error as e:
+            # swallow the error to fix bz 1298327
+            log.exception(e)
+            pass
         self.written_overrides = WrittenOverrideCache()
 
         # FIXME: empty report at the moment, should be changed to include
@@ -502,8 +527,6 @@ class Repo(dict):
         And the other out of band info we need including baseurl, ca_cert, and
         the release version string.
         """
-
-        log.debug("content.label %s %s", content.label, type(content.label))
         repo = cls(content.label)
 
         repo['name'] = content.name
@@ -684,16 +707,14 @@ class RepoFile(ConfigParser):
         # note PATH get's expanded with chroot info, etc
         self.path = Path.join(self.PATH, name)
         self.repos_dir = Path.abs(self.PATH)
-        self.manage_repos = 1
-        if CFG.has_option('rhsm', 'manage_repos'):
-            self.manage_repos = int(CFG.get('rhsm', 'manage_repos'))
+        self.manage_repos = manage_repos_enabled()
         # Simulate manage repos turned off if no yum.repos.d directory exists.
         # This indicates yum is not installed so clearly no need for us to
         # manage repos.
         if not self.path_exists(self.repos_dir):
             log.warn("%s does not exist, turning manage_repos off." %
                     self.repos_dir)
-            self.manage_repos = 0
+            self.manage_repos = False
         self.create()
 
     # Easier than trying to mock/patch os.path.exists

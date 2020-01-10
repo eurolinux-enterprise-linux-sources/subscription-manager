@@ -485,3 +485,28 @@ class EntitlementCertificateFilter(ProductCertificateFilter):
         )
 
         return sl_check and fs_check and (self._sl_filter is not None or self._fs_regex is not None)
+
+
+def print_error(message):
+    " Prints the specified message to stderr "
+
+    sys.stderr.write(message)
+    sys.stderr.write("\n")
+
+
+def unique_list_items(list, hash_function=lambda x: x):
+    """
+    Accepts a list of items.
+    Returns a list of the unique items in the input.
+    Maintains order.
+    """
+    observed = set()
+    unique_items = []
+    for item in list:
+        item_key = hash_function(item)
+        if item_key in observed:
+            continue
+        else:
+            unique_items.append(item)
+            observed.add(item_key)
+    return unique_items

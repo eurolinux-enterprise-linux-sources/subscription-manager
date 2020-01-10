@@ -19,9 +19,9 @@ import logging
 import re
 import threading
 
-import gobject
-import gtk
-import gtk.glade
+from subscription_manager.ga import GObject as ga_GObject
+from subscription_manager.ga import Gtk as ga_Gtk
+from subscription_manager.ga import gtk_compat as ga_gtk_compat
 
 from subscription_manager.exceptions import ExceptionMapper
 import rhsm.connection as connection
@@ -103,9 +103,61 @@ def handle_gui_exception(e, msg, parent, format_msg=True, log_msg=None):
             show_error_window(msg, parent=parent)
 
 
+def format_mapped_message(e, msg, mapped_message, format_msg=True):
+    message = None
+    if isinstance(e, connection.RestlibException):
+        # If this exception's code is in the 200 range (such as 202 ACCEPTED)
+        # we're going to ignore the message we were given and just display
+        # the message from the server as an info dialog. (not an error)
+        if 200 < int(e.code) < 300:
+            message = linkify(mapped_message)
+            return message
+    try:
+        if format_msg:
+            message = msg % linkify(mapped_message)
+        else:
+            message = linkify(mapped_message)
+    except Exception:
+        message = msg
+    return message
+
+
+def format_interpolated_message(e, msg, mapped_message, format_msg=True):
+    message = None
+    #catch-all, try to interpolate and if it doesn't work out, just display the message
+    try:
+        interpolated_str = msg % e
+        message = interpolated_str
+    except Exception:
+        message = msg
+    return message
+
+
+def format_exception(e, msg, format_msg=True, log_msg=None):
+    if isinstance(e, tuple):
+        log.error(log_msg, exc_info=e)
+        # Get the class instance of the exception
+        e = e[1]
+    message = None
+    exception_mapper = ExceptionMapper()
+    mapped_message = exception_mapper.get_message(e)
+    if mapped_message:
+        message = format_mapped_message(e, msg, mapped_message, format_msg=format_msg)
+    else:
+        message = format_interpolated_message(e, msg, mapped_message, format_msg=format_msg)
+
+    return message
+
+
+# FIXME: This should be in messageWindow.py (or better, removed)
 def show_error_window(message, parent=None):
     messageWindow.ErrorDialog(messageWindow.wrap_text(message),
-            parent)
+                              parent)
+
+
+def show_info_window(message, parent=None):
+    messageWindow.InfoDialog(messageWindow.wrap_text(message),
+                             parent)
 
 
 def linkify(msg):
@@ -117,7 +169,7 @@ def linkify(msg):
     #  ? or () or - or / or ;
     url_regex = re.compile("""https?://[\w\.\?\(\)\-\/]*""")
 
-    if gtk.check_version(MIN_GTK_MAJOR, MIN_GTK_MINOR, MIN_GTK_MICRO):
+    if ga_Gtk.check_version(MIN_GTK_MAJOR, MIN_GTK_MINOR, MIN_GTK_MICRO):
         return msg
 
     # dont linkify in firstboot
@@ -136,7 +188,7 @@ def apply_highlight(text, highlight):
     Apply pango markup to highlight a search term in a string
     """
     if not highlight:
-        return gobject.markup_escape_text(text)
+        return ga_GObject.markup_escape_text(text)
 
     regex = re.compile("(" + re.escape(highlight) + ")", re.I)
     parts = regex.split(text)
@@ -146,9 +198,9 @@ def apply_highlight(text, highlight):
     on_search_term = False
     for part in parts:
         if on_search_term:
-            escaped += "<b>%s</b>" % gobject.markup_escape_text(part)
+            escaped += "<b>%s</b>" % ga_GObject.markup_escape_text(part)
         else:
-            escaped += gobject.markup_escape_text(part)
+            escaped += ga_GObject.markup_escape_text(part)
         on_search_term = not on_search_term
 
     return "".join(escaped)
@@ -225,7 +277,9 @@ def gather_group(store, iter, group):
             gather_group(store, child_iter, group)
             child_iter = store.iter_next(child_iter)
 
-    group.append(gtk.TreeRowReference(store, store.get_path(iter)))
+    refs = ga_gtk_compat.tree_row_reference(store, store.get_path(iter))
+    group.append(refs)
+
     return group
 
 
@@ -254,13 +308,14 @@ class AsyncWidgetUpdater(object):
         try:
             result = backend_method(*args, **kwargs)
             if callback:
-                gobject.idle_add(callback, result)
+                ga_GObject.idle_add(callback, result)
         except Exception, e:
             message = exception_msg or str(e)
-            gobject.idle_add(handle_gui_exception, e, message, self.parent_window)
+            ga_GObject.idle_add(handle_gui_exception, e, message, self.parent_window)
         finally:
-            gobject.idle_add(widget_update.finished)
+            ga_GObject.idle_add(widget_update.finished)
 
     def update(self, widget_update, backend_method, args=None, kwargs=None, exception_msg=None, callback=None):
-        threading.Thread(target=self.worker, args=(widget_update,
-            backend_method, args, kwargs, exception_msg, callback)).start()
+        threading.Thread(target=self.worker, name="AsyncWidgetUpdaterThread",
+                         args=(widget_update, backend_method, args,
+                               kwargs, exception_msg, callback)).start()

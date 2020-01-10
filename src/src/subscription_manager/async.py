@@ -19,8 +19,7 @@ import Queue
 import threading
 import gettext
 
-import gobject
-
+from subscription_manager.ga import GObject as ga_GObject
 from subscription_manager.entcertlib import Disconnected
 from subscription_manager.managerlib import fetch_certificates
 from subscription_manager.injection import IDENTITY, \
@@ -61,8 +60,8 @@ class AsyncPool(object):
         """
         Run pool stash refresh asynchronously.
         """
-        gobject.idle_add(self._watch_thread)
-        threading.Thread(target=self._run_refresh,
+        ga_GObject.idle_add(self._watch_thread)
+        threading.Thread(target=self._run_refresh, name="AsyncPoolRefreshThread",
                 args=(active_on, callback, data)).start()
 
 
@@ -81,12 +80,12 @@ class AsyncBind(object):
             ents = self.cp_provider.get_consumer_auth_cp().bindByEntitlementPool(self.identity.uuid, pool['id'], quantity)
             self.plugin_manager.run("post_subscribe", consumer_uuid=self.identity.uuid, entitlement_data=ents)
             if bind_callback:
-                gobject.idle_add(bind_callback)
+                ga_GObject.idle_add(bind_callback)
             fetch_certificates(self.certlib)
             if cert_callback:
-                gobject.idle_add(cert_callback)
+                ga_GObject.idle_add(cert_callback)
         except Exception, e:
-            gobject.idle_add(except_callback, e)
+            ga_GObject.idle_add(except_callback, e)
 
     def _run_unbind(self, serial, selection, callback, except_callback):
         """
@@ -101,14 +100,90 @@ class AsyncBind(object):
                 pass
 
             if callback:
-                gobject.idle_add(callback)
+                ga_GObject.idle_add(callback)
         except Exception, e:
-            gobject.idle_add(except_callback, e, selection)
+            ga_GObject.idle_add(except_callback, e, selection)
 
     def bind(self, pool, quantity, except_callback, bind_callback=None, cert_callback=None):
-        threading.Thread(target=self._run_bind,
+        threading.Thread(target=self._run_bind, name="AsyncBindBindThread",
                 args=(pool, quantity, bind_callback, cert_callback, except_callback)).start()
 
     def unbind(self, serial, selection, callback, except_callback):
-        threading.Thread(target=self._run_unbind,
+        threading.Thread(target=self._run_unbind, name="AsyncBindUnbindThread",
                 args=(serial, selection, callback, except_callback)).start()
+
+
+class AsyncRepoOverridesUpdate(object):
+
+    def __init__(self, overrides_api):
+        self.overrides_api = overrides_api
+        self.identity = require(IDENTITY)
+
+    def _load_data(self, success_callback, except_callback):
+        try:
+            # pull the latest overrides from the cache which will be the ones from the server.
+            current_overrides = self.overrides_api.get_overrides(self.identity.uuid) or []
+
+            # Fetch the repositories from repolib without any overrides applied.
+            # We do this so that we can tell if anything has been modified by
+            # overrides.
+            current_repos = self.overrides_api.repo_lib.get_repos(apply_overrides=False)
+
+            self._process_callback(success_callback, current_overrides, current_repos)
+        except Exception, e:
+            self._process_callback(except_callback, e)
+
+    def _update(self, to_add, to_remove, success_callback, except_callback):
+        '''
+        Processes the override mapping and sends the overrides to the server for addition/removal.
+        '''
+        try:
+            # TODO: At some point we should look into providing a single API call that can handle
+            #       additions and removals in the same call (currently not supported by server).
+            current_overrides = None
+            if len(to_add) > 0:
+                current_overrides = self.overrides_api.add_overrides(self.identity.uuid, to_add)
+
+            if len(to_remove) > 0:
+                current_overrides = self.overrides_api.remove_overrides(self.identity.uuid, to_remove)
+
+            if current_overrides:
+                self.overrides_api.update(current_overrides)
+
+            # Fetch the repositories from repolib without any overrides applied.
+            # We do this so that we can tell if anything has been modified by
+            # overrides.
+            current_repos = self.overrides_api.repo_lib.get_repos(apply_overrides=False)
+
+            self._process_callback(success_callback, current_overrides, current_repos)
+        except Exception, e:
+            self._process_callback(except_callback, e)
+
+    def _remove_all(self, repo_ids, success_callback, except_callback):
+        try:
+            current_overrides = self.overrides_api.remove_all_overrides(self.identity.uuid, repo_ids)
+            self.overrides_api.update(current_overrides)
+
+            # Fetch the repositories from repolib without any overrides applied.
+            # We do this so that we can tell if anything has been modified by
+            # overrides.
+            current_repos = self.overrides_api.repo_lib.get_repos(apply_overrides=False)
+
+            self._process_callback(success_callback, current_overrides, current_repos)
+        except Exception, e:
+            self._process_callback(except_callback, e)
+
+    def _process_callback(self, callback, *args):
+        ga_GObject.idle_add(callback, *args)
+
+    def load_data(self, success_callback, failure_callback):
+        threading.Thread(target=self._load_data, name="AsyncRepoOverridesUpdateLoadDataThread",
+                         args=(success_callback, failure_callback)).start()
+
+    def update_overrides(self, to_add, to_remove, success_callback, except_callback):
+        threading.Thread(target=self._update, name="AsyncRepoOverridesUpdateUpdateOverridesThread",
+                         args=(to_add, to_remove, success_callback, except_callback)).start()
+
+    def remove_all_overrides(self, repo_ids, success_callback, except_callback):
+        threading.Thread(target=self._remove_all, name="AsyncRepoOverridesUpdateRemoveAllOverridesThread",
+                         args=(repo_ids, success_callback, except_callback)).start()

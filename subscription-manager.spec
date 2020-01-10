@@ -3,11 +3,28 @@
 # For optional building of ostree-plugin sub package. Unrelated to systemd
 # but the same versions apply at the moment.
 %global has_ostree %use_systemd
-%global use_old_firstboot (0%{?rhel} && 0%{?rhel} <= 6)
+%global use_firstboot 0
+%global use_initial_setup 1
 %global rhsm_plugins_dir  /usr/share/rhsm-plugins
+%global use_gtk3 %use_systemd
+%global rhel7_minor %(%{__grep} -o "7.[0-9]*" /etc/redhat-release |%{__sed} -s 's/7.//')
+
+%if 0%{?rhel} == 7
+%global use_initial_setup 1
+%global use_firstboot 0
+%endif
+
+# 6 < rhel < 7
+%if 0%{?rhel} == 6
+%global use_initial_setup 0
+%global use_firstboot 1
+%endif
+
+%global use_dnf (0%{?fedora} && 0%{?fedora} >= 22)
 
 
 %global _hardened_build 1
+%{!?__global_ldflags: %global __global_ldflags -Wl,-z,relro -Wl,-z,now}
 
 # A couple files are for RHEL 5 only:
 %if 0%{?rhel} == 5
@@ -20,9 +37,32 @@
 %define install_ostree INSTALL_OSTREE_PLUGIN=false
 %endif
 
+# makefile will guess, but be specific.
+%if %{use_gtk3}
+%define gtk_version GTK_VERSION=3
+%else
+%define gtk_version GTK_VERSION=2
+%endif
+
+%if %{use_initial_setup}
+%define post_boot_tool INSTALL_INITIAL_SETUP=true INSTALL_FIRSTBOOT=false
+%else
+%define post_boot_tool INSTALL_INITIAL_SETUP=false INSTALL_FIRSTBOOT=true
+%endif
+
+# makefile defaults to INSTALL_YUM_PLUGIN=true
+%define install_yum_plugins INSTALL_YUM_PLUGINS=true
+
+# makefile defaults to INSTALL_DNF_PLUGIN=false
+%if %{use_dnf}
+%define install_dnf_plugins INSTALL_DNF_PLUGINS=true
+%else
+%define install_dnf_plugins INSTALL_DNF_PLUGINS=false
+%endif
+
 Name: subscription-manager
-Version: 1.14.10
-Release: 1%{?dist}
+Version: 1.16.8
+Release: 8%{?dist}
 Summary: Tools and libraries for subscription and repository management
 Group:   System Environment/Base
 License: GPLv2
@@ -33,18 +73,30 @@ License: GPLv2
 # yum install tito
 # tito build --tag subscription-manager-$VERSION-$RELEASE --tgz
 Source0: %{name}-%{version}.tar.gz
+Patch0: subscription-manager-1.16.8-1-to-subscription-manager-1.16.8-2.patch
+Patch1: subscription-manager-1.16.8-2-to-subscription-manager-1.16.8-3.patch
+Patch2: subscription-manager-1.16.8-3-to-subscription-manager-1.16.8-4.patch
+Patch3: subscription-manager-1.16.8-4-to-subscription-manager-1.16.8-5.patch
+Patch4: subscription-manager-1.16.8-5-to-subscription-manager-1.16.8-6.patch
+Patch5: subscription-manager-1.16.8-6-to-subscription-manager-1.16.8-7.patch
+Patch6: subscription-manager-1.16.8-7-to-subscription-manager-1.16.8-8.patch
 URL:     http://www.candlepinproject.org/
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
 Requires:  python-ethtool
 Requires:  python-iniparse
-Requires:  pygobject2
 Requires:  virt-what
-Requires:  python-rhsm >= 1.14.2
+Requires:  python-rhsm >= 1.16.0
 Requires:  dbus-python
-Requires:  yum >= 3.2.19-15
+Requires:  yum >= 3.2.29-73
 Requires:  usermode
 Requires:  python-dateutil
+%if %use_gtk3
+Requires: gobject-introspection
+Requires: pygobject3-base
+%else
+Requires:  pygobject2
+%endif
 
 # There's no dmi to read on these arches, so don't pull in this dep.
 %ifnarch ppc ppc64 s390 s390x
@@ -65,11 +117,15 @@ BuildRequires: python-devel
 BuildRequires: gettext
 BuildRequires: intltool
 BuildRequires: libnotify-devel
-BuildRequires: gtk2-devel
 BuildRequires: desktop-file-utils
 BuildRequires: redhat-lsb
 BuildRequires: scrollkeeper
 BuildRequires: GConf2-devel
+%if %use_gtk3
+BuildRequires: gtk3-devel
+%else
+BuildRequires: gtk2-devel
+%endif
 %if %use_systemd
 # We need the systemd RPM macros
 BuildRequires: systemd
@@ -90,6 +146,7 @@ Group: System Environment/Base
 Requires: pygobject3-base
 # plugin needs a slightly newer version of python-iniparse for 'tidy'
 Requires:  python-iniparse >= 0.4
+Requires: %{name} = %{version}-%{release}
 
 %description -n subscription-manager-plugin-ostree
 Enables handling of content of type 'ostree' in any certificates
@@ -106,6 +163,7 @@ the remote in the currently deployed .origin file.
 %package -n subscription-manager-plugin-container
 Summary: A plugin for handling container content.
 Group: System Environment/Base
+Requires: %{name} = %{version}-%{release}
 
 %description -n subscription-manager-plugin-container
 Enables handling of content of type 'containerImage' in any certificates
@@ -125,7 +183,14 @@ from the server. Populates /etc/docker/certs.d appropriately.
 Summary: A GUI interface to manage Red Hat product subscriptions
 Group: System Environment/Base
 Requires: %{name} = %{version}-%{release}
+
+# We need pygtk3 and gtk2 until rhsm-icon is ported to gtk3
+%if %use_gtk3
+Requires: pygobject3
+Requires: gtk3
+%else
 Requires: pygtk2 pygtk2-libglade
+%endif
 Requires: usermode-gtk
 Requires: dbus-x11
 Requires: gnome-icon-theme
@@ -145,22 +210,31 @@ This package contains a GTK+ graphical interface for configuring and
 registering a system with a Red Hat Entitlement platform and manage
 subscriptions.
 
+%if %use_firstboot
 %package -n subscription-manager-firstboot
 Summary: Firstboot screens for subscription manager
 Group: System Environment/Base
 Requires: %{name}-gui = %{version}-%{release}
-
-# Required for firstboot before RHEL 7:
-%if %use_old_firstboot
 Requires: rhn-setup-gnome
-%endif
 
 # Fedora can figure this out automatically, but RHEL cannot:
 Requires: librsvg2
 
-
 %description -n subscription-manager-firstboot
-This package contains the firstboot screens for subscription manager.
+This package contains the firstboot screens for subscription-manager.
+%endif
+
+%if %use_initial_setup
+%package -n subscription-manager-initial-setup-addon
+Summary: initial-setup screens for subscription-manager
+Group: System Environment/Base
+Requires: %{name}-gui = %{version}-%{release}
+Requires: initial-setup-gui >= 0.3.9.24-1
+Obsoletes: subscription-manager-firstboot < 1.15.3-1
+
+%description -n subscription-manager-initial-setup-addon
+This package contains the initial-setup screens for subscription-manager.
+%endif
 
 %package -n subscription-manager-migration
 Summary: Migration scripts for moving to certificate based subscriptions
@@ -178,22 +252,47 @@ Requires: subscription-manager-migration-data
 This package contains scripts that aid in moving to certificate based
 subscriptions
 
+%if %use_dnf
+%package -n dnf-plugin-subscription-manager
+Summary: Subscription Manager plugins for DNF
+Group: System Environment/Base
+Requires: %{name} = %{version}-%{release}
+Requires: dnf >= 1.0.0
+
+%description -n dnf-plugin-subscription-manager
+Subscription Manager plugins for DNF, contains subscription-manager and product-id plugins.
+%endif
+
 %prep
 %setup -q
+%patch0 -p1
+%patch1 -p1
+%patch2 -p1
+%patch3 -p1
+%patch4 -p1
+%patch5 -p1
+%patch6 -p1
 
 %build
-make -f Makefile VERSION=%{version}-%{release} CFLAGS="%{optflags}"
+make -f Makefile VERSION=%{version}-%{release} CFLAGS="%{optflags}" \
+    LDFLAGS="%{__global_ldflags}" OS_DIST="%{dist}" %{?gtk_version}
 
 %install
 rm -rf %{buildroot}
-make -f Makefile install VERSION=%{version}-%{release} PREFIX=%{buildroot} MANPATH=%{_mandir} OS_VERSION=%{?fedora}%{?rhel} %{?install_ostree}
+make -f Makefile install VERSION=%{version}-%{release} \
+    PREFIX=%{buildroot} MANPATH=%{_mandir} PYTHON_SITELIB=%{python_sitelib} \
+    OS_VERSION=%{?fedora}%{?rhel} OS_DIST=%{dist} \
+    %{?install_ostree} %{?post_boot_tool} %{?gtk_version} \
+    %{?install_yum_plugins} %{?install_dnf_plugins}
 
 desktop-file-validate \
         %{buildroot}/etc/xdg/autostart/rhsm-icon.desktop
 
 desktop-file-validate \
         %{buildroot}/usr/share/applications/subscription-manager-gui.desktop
+
 %find_lang rhsm
+%find_lang %{name} --with-gnome
 
 # fix timestamps on our byte compiled files so them match across arches
 find %{buildroot} -name \*.py -exec touch -r %{SOURCE0} '{}' \;
@@ -233,26 +332,69 @@ gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 %clean
 rm -rf %{buildroot}
 
+# base/cli tools use the gettext domain 'rhsm', while the
+# gnome-help tools use domain 'subscription-manager'
 %files -f rhsm.lang
 %defattr(-,root,root,-)
 
-%attr(755,root,root) %dir %{_var}/log/rhsm
-%attr(755,root,root) %dir %{_var}/spool/rhsm/debug
+# executables
+%attr(755,root,root) %{_sbindir}/subscription-manager
+
+# symlink to console-helper
+%{_bindir}/subscription-manager
+%attr(755,root,root) %{_bindir}/rhsmcertd
+
+%attr(755,root,root) %{_libexecdir}/rhsmcertd-worker
+%attr(755,root,root) %{_libexecdir}/rhsmd
+
+# init scripts and systemd services
+%if %use_systemd
+    %attr(644,root,root) %{_unitdir}/rhsmcertd.service
+    %attr(644,root,root) %{_tmpfilesdir}/%{name}.conf
+%else
+    %attr(755,root,root) %{_initrddir}/rhsmcertd
+%endif
+
+# our config dirs and files
 %attr(755,root,root) %dir %{_sysconfdir}/rhsm
+%attr(644,root,root) %config(noreplace) %{_sysconfdir}/rhsm/rhsm.conf
+%config(noreplace) %attr(644,root,root) %{_sysconfdir}/rhsm/logging.conf
+
 %attr(755,root,root) %dir %{_sysconfdir}/rhsm/facts
+
 %attr(755,root,root) %dir %{_sysconfdir}/pki/consumer
 %attr(755,root,root) %dir %{_sysconfdir}/pki/entitlement
 
-%attr(644,root,root) %config(noreplace) %{_sysconfdir}/rhsm/rhsm.conf
 %config(noreplace) %{_sysconfdir}/dbus-1/system.d/com.redhat.SubscriptionManager.conf
 
-#remove the repo file when we are deleted
+# PAM config
+%{_sysconfdir}/pam.d/subscription-manager
+%{_sysconfdir}/security/console.apps/subscription-manager
+
+# remove the repo file when we are deleted
 %ghost %{_sysconfdir}/yum.repos.d/redhat.repo
 
-%config(noreplace) %attr(644,root,root) %{_sysconfdir}/rhsm/logging.conf
+# yum plugin config
 %config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/subscription-manager.conf
 %config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/product-id.conf
+%config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/search-disabled-repos.conf
+
+# misc system config
 %config(noreplace) %attr(644,root,root) %{_sysconfdir}/logrotate.d/subscription-manager
+%attr(700,root,root) %{_sysconfdir}/cron.daily/rhsmd
+%{_datadir}/dbus-1/system-services/com.redhat.SubscriptionManager.service
+
+
+# /var
+%attr(755,root,root) %dir %{_var}/log/rhsm
+%attr(755,root,root) %dir %{_var}/spool/rhsm/debug
+%attr(755,root,root) %dir %{_var}/run/rhsm
+%attr(755,root,root) %dir %{_var}/lib/rhsm
+%attr(755,root,root) %dir %{_var}/lib/rhsm/facts
+%attr(755,root,root) %dir %{_var}/lib/rhsm/packages
+%attr(755,root,root) %dir %{_var}/lib/rhsm/cache
+
+# bash completion scripts
 %{_sysconfdir}/bash_completion.d/subscription-manager
 %{_sysconfdir}/bash_completion.d/rct
 %{_sysconfdir}/bash_completion.d/rhsm-debug
@@ -260,105 +402,48 @@ rm -rf %{buildroot}
 %{_sysconfdir}/bash_completion.d/rhsm-icon
 %{_sysconfdir}/bash_completion.d/rhsmcertd
 
-%attr(700,root,root) %{_sysconfdir}/cron.daily/rhsmd
-%{_datadir}/dbus-1/system-services/com.redhat.SubscriptionManager.service
 
+# code
+# python package dirs
 %dir %{_datadir}/rhsm
 %dir %{_datadir}/rhsm/subscription_manager
+%dir %{_datadir}/rhsm/subscription_manager/api
 %dir %{_datadir}/rhsm/subscription_manager/branding
 %dir %{_datadir}/rhsm/subscription_manager/model
 %dir %{_datadir}/rhsm/subscription_manager/plugin
 
+# code, python modules and packages
 %{_datadir}/rhsm/subscription_manager/*.py*
-%{_datadir}/rhsm/subscription_manager/branding/*.py*
-%{_datadir}/rhsm/subscription_manager/model/*.py*
-%{_datadir}/rhsm/subscription_manager/async.py*
-%{_datadir}/rhsm/subscription_manager/base_action_client.py*
-%{_datadir}/rhsm/subscription_manager/base_plugin.py*
-%{_datadir}/rhsm/subscription_manager/branding
-%{_datadir}/rhsm/subscription_manager/cache.py*
-%{_datadir}/rhsm/subscription_manager/certdirectory.py*
-%{_datadir}/rhsm/subscription_manager/certlib.py*
-%{_datadir}/rhsm/subscription_manager/content_action_client.py*
-%{_datadir}/rhsm/subscription_manager/action_client.py*
-%{_datadir}/rhsm/subscription_manager/cert_sorter.py*
-%{_datadir}/rhsm/subscription_manager/cli.py*
-%{_datadir}/rhsm/subscription_manager/dbus_interface.py*
 
-%{_datadir}/rhsm/subscription_manager/dmiinfo.py*
-%{_datadir}/rhsm/subscription_manager/entcertlib.py*
-%{_datadir}/rhsm/subscription_manager/entbranding.py*
-%{_datadir}/rhsm/subscription_manager/cp_provider.py*
-%{_datadir}/rhsm/subscription_manager/factlib.py*
-%{_datadir}/rhsm/subscription_manager/facts.py*
-%{_datadir}/rhsm/subscription_manager/healinglib.py*
-%{_datadir}/rhsm/subscription_manager/hwprobe.py*
-%{_datadir}/rhsm/subscription_manager/isodate.py*
-%{_datadir}/rhsm/subscription_manager/i18n_optparse.py*
-%{_datadir}/rhsm/subscription_manager/i18n.py*
-%{_datadir}/rhsm/subscription_manager/identity.py*
-%{_datadir}/rhsm/subscription_manager/identitycertlib.py*
-%{_datadir}/rhsm/subscription_manager/injection.py*
-%{_datadir}/rhsm/subscription_manager/injectioninit.py*
-%{_datadir}/rhsm/subscription_manager/__init__.py*
-%{_datadir}/rhsm/subscription_manager/installedproductslib.py*
-%{_datadir}/rhsm/subscription_manager/jsonwrapper.py*
-%{_datadir}/rhsm/subscription_manager/listing.py*
-%{_datadir}/rhsm/subscription_manager/lock.py*
-%{_datadir}/rhsm/subscription_manager/logutil.py*
-%{_datadir}/rhsm/subscription_manager/managercli.py*
-%{_datadir}/rhsm/subscription_manager/managerlib.py*
-%{_datadir}/rhsm/subscription_manager/model
-%{_datadir}/rhsm/subscription_manager/model/*.py
-%{_datadir}/rhsm/subscription_manager/packageprofilelib.py*
-%{_datadir}/rhsm/subscription_manager/plugins.py*
-%{_datadir}/rhsm/subscription_manager/productid.py*
-%{_datadir}/rhsm/subscription_manager/reasons.py*
-%{_datadir}/rhsm/subscription_manager/release.py*
-%{_datadir}/rhsm/subscription_manager/repolib.py*
-%{_datadir}/rhsm/subscription_manager/rhelentbranding.py*
-%{_datadir}/rhsm/subscription_manager/rhelproduct.py*
-%{_datadir}/rhsm/subscription_manager/utils.py*
-%{_datadir}/rhsm/subscription_manager/printing_utils.py*
-%{_datadir}/rhsm/subscription_manager/validity.py*
-%{_datadir}/rhsm/subscription_manager/reasons.py*
-%{_datadir}/rhsm/subscription_manager/cp_provider.py*
-%{_datadir}/rhsm/subscription_manager/file_monitor.py*
-%{_datadir}/rhsm/subscription_manager/overrides.py*
-%{_datadir}/rhsm/subscription_manager/exceptions.py*
+%{_datadir}/rhsm/subscription_manager/api/*.py*
+%{_datadir}/rhsm/subscription_manager/branding/*.py*
+
+# our gtk2/gtk3 compat modules
+%dir %{_datadir}/rhsm/subscription_manager/ga_impls
+%{_datadir}/rhsm/subscription_manager/ga_impls/__init__.py*
+
+%if %use_gtk3
+%{_datadir}/rhsm/subscription_manager/ga_impls/ga_gtk3.py*
+%else
+%dir %{_datadir}/rhsm/subscription_manager/ga_impls/ga_gtk2
+%{_datadir}/rhsm/subscription_manager/ga_impls/ga_gtk2/*.py*
+%endif
+
+%{_datadir}/rhsm/subscription_manager/model/*.py*
+
 %{_datadir}/rhsm/subscription_manager/plugin/*.py*
 
-%{_datadir}/rhsm/subscription_manager/version.py*
 # subscription-manager plugins
 %dir %{rhsm_plugins_dir}
 %dir %{_sysconfdir}/rhsm/pluginconf.d
-# add default plugins here when we have some
 
 # yum plugins
 # Using _prefix + lib here instead of libdir as that evaluates to /usr/lib64 on x86_64,
 # but yum plugins seem to normally be sent to /usr/lib/:
 %{_prefix}/lib/yum-plugins/subscription-manager.py*
 %{_prefix}/lib/yum-plugins/product-id.py*
+%{_prefix}/lib/yum-plugins/search-disabled-repos.py*
 
-%attr(755,root,root) %{_sbindir}/subscription-manager
-%attr(755,root,root) %{_bindir}/subscription-manager
-%attr(755,root,root) %{_bindir}/rhsmcertd
-%attr(755,root,root) %{_libexecdir}/rhsmcertd-worker
-%attr(755,root,root) %{_libexecdir}/rhsmd
-%attr(755,root,root) %dir %{_var}/run/rhsm
-%attr(755,root,root) %dir %{_var}/lib/rhsm
-%attr(755,root,root) %dir %{_var}/lib/rhsm/facts
-%attr(755,root,root) %dir %{_var}/lib/rhsm/packages
-%attr(755,root,root) %dir %{_var}/lib/rhsm/cache
-%{_sysconfdir}/pam.d/subscription-manager
-%{_sysconfdir}/security/console.apps/subscription-manager
-
-%if %use_systemd
-    %attr(644,root,root) %{_unitdir}/rhsmcertd.service
-    %attr(644,root,root) %{_tmpfilesdir}/%{name}.conf
-%else
-    %attr(755,root,root) %{_initrddir}/rhsmcertd
-%endif
 
 # Incude rt CLI tool
 %dir %{_datadir}/rhsm/rct
@@ -385,12 +470,19 @@ rm -rf %{buildroot}
 %doc LICENSE
 
 
-%files -n subscription-manager-gui
+%files -n subscription-manager-gui -f subscription-manager.lang
 %defattr(-,root,root,-)
+%attr(755,root,root) %{_sbindir}/subscription-manager-gui
+# symlink to console-helper
+%{_bindir}/subscription-manager-gui
+%{_bindir}/rhsm-icon
 %dir %{_datadir}/rhsm/subscription_manager/gui
 %dir %{_datadir}/rhsm/subscription_manager/gui/data
+%dir %{_datadir}/rhsm/subscription_manager/gui/data/ui
+%dir %{_datadir}/rhsm/subscription_manager/gui/data/glade
 %dir %{_datadir}/rhsm/subscription_manager/gui/data/icons
-%{_datadir}/rhsm/subscription_manager/gui/*
+%{_datadir}/rhsm/subscription_manager/gui/data/ui/*.ui
+%{_datadir}/rhsm/subscription_manager/gui/data/glade/*.glade
 %{_datadir}/rhsm/subscription_manager/gui/data/icons/*.svg
 %{_datadir}/applications/subscription-manager-gui.desktop
 %{_datadir}/icons/hicolor/16x16/apps/*.png
@@ -401,13 +493,13 @@ rm -rf %{buildroot}
 %{_datadir}/icons/hicolor/96x96/apps/*.png
 %{_datadir}/icons/hicolor/256x256/apps/*.png
 %{_datadir}/icons/hicolor/scalable/apps/*.svg
-%attr(755,root,root) %{_sbindir}/subscription-manager-gui
-%attr(755,root,root) %{_bindir}/subscription-manager-gui
 %{_datadir}/appdata/subscription-manager-gui.appdata.xml
 
-%{_bindir}/rhsm-icon
-%{_sysconfdir}/xdg/autostart/rhsm-icon.desktop
+# code and modules
+%{_datadir}/rhsm/subscription_manager/gui/*.py*
 
+# gui system config files
+%{_sysconfdir}/xdg/autostart/rhsm-icon.desktop
 %{_sysconfdir}/pam.d/subscription-manager-gui
 %{_sysconfdir}/security/console.apps/subscription-manager-gui
 %{_sysconfdir}/bash_completion.d/subscription-manager-gui
@@ -415,22 +507,30 @@ rm -rf %{buildroot}
 %doc
 %{_mandir}/man8/subscription-manager-gui.8*
 %{_mandir}/man8/rhsm-icon.8*
-%{_datadir}/omf/subscription-manager
-%attr(644,root,root) %{_datadir}/omf/subscription-manager/*.omf
-%{_datadir}/gnome/help/subscription-manager
-%attr(644,root,root) %{_datadir}/gnome/help/subscription-manager/C/*
-%attr(755,root,root) %{_datadir}/gnome/help/subscription-manager/C/figures
 %doc LICENSE
 
-%files -n subscription-manager-firstboot
+
+%if %use_initial_setup
+%files -n subscription-manager-initial-setup-addon
 %defattr(-,root,root,-)
-# RHEL 6 needs a different location for firstboot modules:
-%if %use_old_firstboot
-%{_datadir}/rhn/up2date_client/firstboot/rhsm_login.py*
-%else
-%{_datadir}/firstboot/modules/rhsm_login.py*
+%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/
+%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/
+%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/spokes/
+%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/categories/
+%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/ks/
+%{_datadir}/anaconda/addons/com_redhat_subscription_manager/*.py*
+%{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/*.py*
+%{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/spokes/*.ui
+%{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/spokes/*.py*
+%{_datadir}/anaconda/addons/com_redhat_subscription_manager/categories/*.py*
+%{_datadir}/anaconda/addons/com_redhat_subscription_manager/ks/*.py*
 %endif
 
+%if %use_firstboot
+%files -n subscription-manager-firstboot
+%defattr(-,root,root,-)
+%{_datadir}/rhn/up2date_client/firstboot/rhsm_login.py*
+%endif
 
 %files -n subscription-manager-migration
 %defattr(-,root,root,-)
@@ -444,6 +544,12 @@ rm -rf %{buildroot}
 #only install this file on Fedora
 %if 0%{?fedora} > 14
 %doc README.Fedora
+%endif
+
+%if %use_dnf
+%files -n dnf-plugin-subscription-manager
+%defattr(-,root,root,-)
+%{python_sitelib}/dnf-plugins/*
 %endif
 
 %post
@@ -485,10 +591,310 @@ fi
 %endif
 
 %changelog
-* Mon Jun 08 2015 William Poteat <wpoteat@redhat.com> 1.14.10-1
-- 1225435: Use LC_ALL instead of LANG for lscpu. (alikins@redhat.com)
+* Mon Mar 28 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-8
+- 1303768: Removes whitespace and updates translations (csnyder@redhat.com)
+
+* Mon Mar 21 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-7
+- 1303768: Adds updated translations in the KO and RU locales.
+  (csnyder@redhat.com)
+
+* Mon Mar 21 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-6
+- 1315859: Only show one proxy dialog (csnyder@redhat.com)
+
+* Tue Mar 15 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-5
+- 1303768: Adds translations from zanata. (csnyder@redhat.com)
+- 1313631: Registration with one environment proceeds as normal
+  (csnyder@redhat.com)
+* Sat Mar 05 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-4
+- 1303768: Adds additional updated translations from zanata.
+  (csnyder@redhat.com)
+- 1312367: Progress bar needs to go away on repo update connection fail
+  (wpoteat@redhat.com)
+- 1302564: Push 'Done' box as close to center of firstboot page as possible
+  (wpoteat@redhat.com)
+- 1309553: Do not fail on check for consumer["type"]["manifest"]
+  (csnyder@redhat.com)
+- 1304427: Fixes system path to properly import from module
+  subscription_manager (csnyder@redhat.com)
+- 1311935: Stylish fixups for firstboot fixes. (alikins@redhat.com)
+- 1311935: Emits register-message instead of register-error for display of user
+  errors (csnyder@redhat.com)
+
+* Tue Feb 23 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-3
+- 1303768: Adds updated keys and translations from zanata. (csnyder@redhat.com)
+- 1303092: GUI issues in Repos and Help (wpoteat@redhat.com)
+- 1304280: Tab stop needed on cancel button (wpoteat@redhat.com)
+- 1308523: Navigation buttons sensitivity matches the current_screen.ready
+  (csnyder@redhat.com)
+- 1302775: Navigate through all rhsm firstboot screens (csnyder@redhat.com)
+- 1308732: Leave hw fact virt.uuid unset if unknown (alikins@redhat.com)
+- 1290885: Display formatted error if no DISPLAY exists. (awood@redhat.com)
+- 1220283: Choose server text no longer overlapped by icon.
+  (csnyder@redhat.com)
+- 1300791: Update man page footers (wpoteat@redhat.com)
+
+* Tue Feb 09 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-2
+- 1300259: Select service level label no longer overlaps dropdown box
+  (csnyder@redhat.com)
+- 1300816: Add proc_cpuinfo facts for ppc64/le (alikins@redhat.com)
+- 1300805: Add support for ppc64 virt.uuid (alikins@redhat.com)
+
+* Tue Jan 19 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-1
+- 1298586: Message needed for remove only invalid pool (wpoteat@redhat.com)
+- 1046132: rhsm_icon uses status from check_status (alikins@redhat.com)
+- 1282961: Update yum version to current RHEL 6.8 one (wpoteat@redhat.com)
+- 1046132: rhsm-icon pops up at annoying times - a second attempt
+  (vrjain@redhat.com)
+- 1298327: Handles exception in repolib (csnyder@redhat.com)
+- 1297313: Fixed layout issues with the repository management dialog on GTK2
+  (ceiu@cericlabs.com)
+- 1292038: Changed adjustments to GtkAdjustment objects
+- 1292013: Retain reference to backend for use in proxy config
+  (csnyder@redhat.com)
+
+* Fri Jan 08 2016 Alex Wood <awood@redhat.com> 1.16.7-1
+- 1263037: Change RHSM Icon reporting of unregistered system
+  (wpoteat@redhat.com)
+- 1283749: Upgrade the dialogs to error when required fields are blank.
+  (wpoteat@redhat.com)
+- 1222627: Allows removal of product certs with no active repos, given
+  temp_disabled_repos (csnyder@redhat.com)
+- 1163398: Modify icon-rhsm man page to reflect the help text
+  (wpoteat@redhat.com)
+- Install docs with mode 644 (csnyder@redhat.com)
+- 1288626: Does not report pool ids as serial numbers, ignore duplicates
+  (csnyder@redhat.com)
+- 1061407: Avoid unwanted translations for subscription-manager by string
+  substitutions (wpoteat@redhat.com)
+- Output of errors now goes to stderr (csnyder@redhat.com)
+- Use matches string to highlight the field(s) containing the match
+  (wpoteat@redhat.com)
+
+* Fri Dec 04 2015 Alex Wood <awood@redhat.com> 1.16.6-1
+- 1285004: Adds check for access to the required manager capabilty
+  (csnyder@redhat.com)
+- 1278472: Change default registration url to subscription.rhsm.redhat.com
+  (wpoteat@redhat.com)
+- 1275179: Do not allow quantity with auto attach (wpoteat@redhat.com)
+- 976859: Only check server version if asked. (alikins@redhat.com)
+- 1195003: Subscription manager man page mention of wild cards for repo enable
+  (wpoteat@redhat.com)
+- Use the stock 'close' button for close button. (alikins@redhat.com)
+
+* Thu Oct 15 2015 Alex Wood <awood@redhat.com> 1.16.4-1
+- 1264964: Ignore uuid=None on package sync (alikins@redhat.com)
+- Set register-status in RegisterInfo init. (alikins@redhat.com)
+- Add glade for selectsla combobox for rhel6 (alikins@redhat.com)
+- 1254460: Fixed the credits button in the about dialog in subman GUI
+  (crog@redhat.com)
+- 1192120: Fixed remaining instances of "reregister" in the man pages
+  (crog@redhat.com)
+- 1270204: Crash report no longer sent when widget is none (csnyder@redhat.com)
+- Cancel button is now labelled "Close" (csnyder@redhat.com)
+- 1268088: Changes the rhsm spoke display message to end with "registered"
+  (csnyder@redhat.com)
+- Use class methods instead of redundant ad-hoc methods. (alikins@redhat.com)
+- 1251853: Fix errors if "manage_repos = " in cfg (alikins@redhat.com)
+- 1268102: Stop main window from opening duplicate dialogs. (awood@redhat.com)
+- 1268095: Replace SLA radio buttons w/ combobox (alikins@redhat.com)
+- 1268060: Add 'cancel' back to s-m-gui register. (alikins@redhat.com)
+- 1268028: Fix skipped auto attach in registergui (alikins@redhat.com)
+- 1266929: Fix bug with exception reporting in register dialog.
+  (awood@redhat.com)
+- 1266480: Refresh TreeView selection after subscriptions are removed.
+  (awood@redhat.com)
+- Allow 'back' to go back multiple times. (alikins@redhat.com)
+- 1267034: Handle 401 with cert based auth (alikins@redhat.com)
+- 1262075,1267179: Fix back/cancel nav (alikins@redhat.com)
+- 1267287: Fix allsubs tab ui regression (alikins@redhat.com)
+- 1266994: Use our icon for initial-setup spoke icon (alikins@redhat.com)
+- 1261006: Handle multiple nav button clicks (alikins@redhat.com)
+- 1242998, 1254550: Fix "already reg'ed" in initial-setup (alikins@redhat.com)
+- 1265347, 1265371: Added translation updates and corrections from 1.15.X
+  (crog@redhat.com)
+
+* Fri Sep 25 2015 Alex Wood <awood@redhat.com> 1.16.3-1
+- 1249012: fix start-end date original color (vrjain@redhat.com)
+- 884288: Make register widgets handle resizing. (alikins@redhat.com)
+- 1185958: Quieter ostree plugin sans ostree (alikins@redhat.com)
+- 1168268: Add rhsm.conf proxy info to ostree repo (alikins@redhat.com)
+- 1249012: Start-End Date of expired subscription is now in red status
+  (vrjain@redhat.com)
+- 1262989: Fix unregister action when consumer is already 'Gone' on server
+  (fnguyen@redhat.com)
+- 1262919: Added convenience function for printing to stderr (crog@redhat.com)
+- Add a note about GoneException handling. (alikins@redhat.com)
+- Fixed error message, removed mention of ghost --refresh (vrjain@redhat.com)
+- Delete the 'release' status cache on clean all. (alikins@redhat.com)
+- Fixed error message, removed mention of ghost --refresh (vrjain@redhat.com)
+- 1248833: Ensure the displayMessage is displayed regardless of success or
+  failure (csnyder@redhat.com)
+- 1254550: Fix activation key usage in gui. (alikins@redhat.com)
+- Re-initialize() RegisterWidget on RegDialog show (alikins@redhat.com)
+- 1257943:Adding a warning to repo-override command when manage_repos = 0
+  (fnguyen@redhat.com)
+- 1251853: Manage repos config entry needs to allow blank value
+  (wpoteat@redhat.com)
+
+* Wed Sep 02 2015 Alex Wood <awood@redhat.com> 1.16.2-1
+- 884288: Better registergui for initial-setup (alikins@redhat.com)
+- 1254349: move Resgistering to message (vrjain@redhat.com)
+- 1257460: Set text domain on Gtk.Builder widgets (alikins@redhat.com)
+- 1246680: Hide rhsm-debug --subscriptions options (alikins@redhat.com)
+- Set help file name for the Subscription Manager spoke
+  (martin.kolman@gmail.com)
+- 1246680: Remove subscriptions from rhsm-debug (wpoteat@redhat.com)
+- Enabled help options on first tab (seanokeeffe797@gmail.com)
+- 1207247: Insecure parameter needs more explanation (wpoteat@redhat.com)
+- 1253275: Fix initial-setup ks mode (alikins@redhat.com)
+- Stopped --consumerid = distributor id (vrjain@redhat.com)
+- 1246429: Stop spinbutton from blocking quantity (alikins@redhat.com)
+- 1185958: Remove ostree plugins req on ostree (alikins@redhat.com)
+- Do not allow using --force with --consumerid (vrjain@redhat.com)
+- 1141128: Subscriptions need refresh after imported cert removed
+  (wpoteat@redhat.com)
+- x86_64 and aarch /proc/cpuinfo module (alikins@redhat.com)
+
+* Thu Aug 13 2015 Alex Wood <awood@redhat.com> 1.16.1-1
+- 1150150: Ostree update report should log updates in proper section
+  (wpoteat@redhat.com)
+- 1141128: Clean up and correct for style (wpoteat@redhat.com)
+- 1251610: Port and prefix were reversed in connection URL statement
+  (wpoteat@redhat.com)
+- 1141128: Imported certificate in detatched scenario not getting deleted
+  (wpoteat@redhat.com)
+- 1240553: Fix detection of cert dir changes (alikins@redhat.com)
+- Fixing All Subscriptions layout issues (mstead@redhat.com)
+- 1221273: Auto-attach failure should not short-circuit other parts of
+  registration (wpoteat@redhat.com)
+- Remove use of Widget.is_toplevel() (alikins@redhat.com)
+- Require initial-setup >= 0.3.9.24, no fb on el7 (alikins@redhat.com)
+- Fix spec file build errors (alikins@redhat.com)
+- search-disabled-repos: ignore failed temporarily enabled repos
+  (vmukhame@redhat.com)
+- search-disabled-repos: replace CLI with API calls for enabling repos
+  permanently (vmukhame@redhat.com)
+- Add new api package to RPM. (awood@redhat.com)
+- Turn off ga loading debug messages. (alikins@redhat.com)
+- Specify a thread name for any threads we start. (alikins@redhat.com)
+- 1248746: Fix layout of contract dialog (GTK3) (mstead@redhat.com)
+- 1248821: Add Gtk.Window to ga_gtk2.Gtk (alikins@redhat.com)
+- 1248821: All subs date picker was failing. (alikins@redhat.com)
+- 1249053: Fixed layout/blank button issues on owner selection dialog
+  (mstead@redhat.com)
+- 1248729: All subs filter dialog was not focused. (alikins@redhat.com)
+- 1248664: Fix GtkAdjustment related warnings (alikins@redhat.com)
+- 1248546: Slightly better looking done screen. (alikins@redhat.com)
+- 1243704: Goto error screen on 'cancel' (alikins@redhat.com)
+- 1245557: Fix release and service level preferences (alikins@redhat.com)
+- Add GTK_COMPAT_VERSION to ga_gtk2/gtk_compat (alikins@redhat.com)
+- 1248773: Fixed proxy dialog layout (GTK3) (mstead@redhat.com)
+- 1248771: Fixing activation key dialog layout (GTK3) (mstead@redhat.com)
+- 1247723: Fixed layout issues in Facts dialog (GTK3) (mstead@redhat.com)
+- 1245283: Properly initialize AutobindWizard when auto-attach is clicked
+  (mstead@redhat.com)
+- 1248546: Refine the aesthics of register dialog. (alikins@redhat.com)
+- 1243260: Make proxy config dialog work. (alikins@redhat.com)
+- 1161157,1155954: Improve performance of Repository Dialog (mstead@redhat.com)
+- 1185958: Make ostree plugin depend on ostree. (alikins@redhat.com)
+- 1165771: make content plugins require subman (alikins@redhat.com)
+- Move gtk_compat features to sub ga module. (alikins@redhat.com)
+- Use idle_add from ga_Object for 6.x (alikins@redhat.com)
+- Updated initial-setup-addon package requirement to initial-setup-gui
+  (crog@redhat.com)
+- Only build initial-setup rpm on rhel > 7.1 (alikins@redhat.com)
+
+* Fri Jul 24 2015 Alex Wood <awood@redhat.com> 1.16.0-1
+- Bump version to 1.16 (crog@redhat.com)
+- Changed initial-setup-addon package requirement from subman to subman-gui
+  (crog@redhat.com)
+- Cast product.id to int for sort in cat-cert (alikins@redhat.com)
+- 1136163: Ignore pythonpath to avoid selinux AVCs (alikins@redhat.com)
+- 985157: Display the URL that is the registration target (wpoteat@redhat.com)
+- 1234413: lower log level of rhsmd RHN messages (alikins@redhat.com)
+
+* Fri Jul 10 2015 Chris Rog <crog@redhat.com> 1.15.7-1
+- Merge pull request #1219 from candlepin/alikins/1241247_ga_ImportError
+  (ceiu@cericlabs.com)
+- Merge pull request #1211 from candlepin/awood/1232232-enable-repos
+  (alikins@redhat.com)
+- 1241247: Fix ga ImportError in rhsmcertd (alikins@redhat.com)
+- Merge pull request #1214 from
+  candlepin/alikins/prevent_nose_loading_ga_impls_directly (awood@redhat.com)
+- Add comment about the request_injection decorator. (awood@redhat.com)
+- Prevent nose looking for tests in sub_manager/ (alikins@redhat.com)
+- Remove assertIn as that test is not in Python 2.6. (awood@redhat.com)
+- Move API dependency injection out of module scope. (awood@redhat.com)
+- 1232232: Add supported API to enable content repositories. (awood@redhat.com)
+
+* Wed Jul 08 2015 Chris Rog <crog@redhat.com> 1.15.6-1
+- 1241184: Updated Makefile to prevent version string clobbering
+  (crog@redhat.com)
+
+* Tue Jul 07 2015 Adrian Likins <alikins@redhat.com> 1.15.5-1
+- 1240801: Use latest initial-setup API (alikins@redhat.com)
+
+* Tue Jul 07 2015 Adrian Likins <alikins@redhat.com> 1.15.4-1
+- Make initial-setup rpm Obsolete firstboot rpm. (alikins@redhat.com)
+
+* Mon Jul 06 2015 Adrian Likins <alikins@redhat.com> 1.15.3-1
+- 1232508: file_monitor is no longer a gobject (alikins@redhat.com)
+- Add 'subscription-manager-initial-setup-addon' sub package (alikins@redhat.com)
+- Make 'subscription-manager-firstboot' optional (alikins@redhat.com)
+- Make 'firstboot' and 'initial-setup' RHEL version dependent (alikins@redhat.com)
+- Add initial-setup modules. (alikins@redhat.com)
+- Port gui from gtk2 to gtk3 via 'ga' (alikins@redhat.com)
+- Make gui support gtk2 and gtk3 (alikins@redhat.com)
+- Add module 'ga' ('gtk any') as Gtk ver abstraction (alikins@redhat.com)
+- Add search-disabled-repos plugin. (vmukhame@redhat.com)
+
+* Mon Jun 22 2015 Chris Rog <crog@redhat.com> 1.15.2-1
+- Added release target for RHEL 7.2 (crog@redhat.com)
+- Move po compile/install for faster 'install-files' (alikins@redhat.com)
+- Stop using deprecated Tito settings. (awood@redhat.com)
+
+* Thu Jun 11 2015 Alex Wood <awood@redhat.com> 1.15.1-1
+- Don't try to set file attrs on symlinks in spec (alikins@redhat.com)
 - 1228807: Make disabling proxy via gui apply (alikins@redhat.com)
+- Use find_lang --with-gnome for the gnome help (alikins@redhat.com)
+- Cast return daemon() to void to quiet warnings. (alikins@redhat.com)
+- Make the 'compile-po' step in the build quiet. (alikins@redhat.com)
+- Make desktop-file-validate warnings. (alikins@redhat.com)
+- rpm spec file reorg (alikins@redhat.com)
 - 1224806: Prevent yum blocking on rhsm locks (alikins@redhat.com)
+- 1092564: Add LDFLAGS to makefile so RPM can modify them. (awood@redhat.com)
+- Update registergui.py (wpoteat@redhat.com)
+- Bump version to 1.15 (wpoteat@redhat.com)
+- Remove spurious debug logging about content labels (alikins@redhat.com)
+- Revert "1189953: Replaced usage of "startup" with "start-up""
+  (crog@redhat.com)
+- Revert "1149098: Removed uses of the non-word "unregister"" (crog@redhat.com)
+- Revert "1189937: Added hypens to instances of the non-word "wildcard""
+  (crog@redhat.com)
+- Revert "1200507: Hyphenated uses of the non-word "plugin."" (crog@redhat.com)
+- 1225435: Use LC_ALL instead of LANG for lscpu. (alikins@redhat.com)
+- Remove mutable default args in stubs (alikins@redhat.com)
+- Add notes about how register/firstboot interact. (alikins@redhat.com)
+- 1189953: Replaced usage of "startup" with "start-up" (crog@redhat.com)
+- 1194453: Fixed typos and grammar issues in the rhsmcertd man page
+  (crog@redhat.com)
+- 1192646: Fixed typos and grammar issues in the RHSM conf man page
+  (crog@redhat.com)
+- 1192574: Fixed typos and grammar issues in subman GUI man page
+  (crog@redhat.com)
+- 1192120: Fixed typos and grammar issues in subman man page (crog@redhat.com)
+- 1192094: Fixed erroneous usage of "servicelevel" for the subman command
+  (crog@redhat.com)
+- 1194468: Fixed typos and grammar in rhsm-debug man page (crog@redhat.com)
+- 1193991: Fixed typos and header for RCT man page. (crog@redhat.com)
+- 1200507: Hyphenated uses of the non-word "plugin." (crog@redhat.com)
+- 1189946: Removed extraneous hyphens from instances of "pre-configure"
+  (crog@redhat.com)
+- 1189937: Added hypens to instances of the non-word "wildcard"
+  (crog@redhat.com)
+- 1149098: Removed uses of the non-word "unregister" (crog@redhat.com)
+- 1189880: Removed the non-word "unentitle" from error messages
+  (crog@redhat.com)
 
 * Tue Jun 02 2015 William Poteat <wpoteat@redhat.com> 1.14.9-1
 - 1223038: Fix API used by openshift clients. (alikins@redhat.com)

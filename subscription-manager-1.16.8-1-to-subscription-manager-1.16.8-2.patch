@@ -1,0 +1,2471 @@
+diff --git a/.tito/packages/subscription-manager b/.tito/packages/subscription-manager
+index 9de545c..a984192 100644
+--- a/.tito/packages/subscription-manager
++++ b/.tito/packages/subscription-manager
+@@ -1 +1 @@
+-1.16.8-1 ./
++1.16.8-2 ./
+diff --git a/.tito/tito.props b/.tito/tito.props
+index eab3f19..6a9ac49 100644
+--- a/.tito/tito.props
++++ b/.tito/tito.props
+@@ -1,5 +1,7 @@
++[globalconfig]
++default_builder = tito.distributionbuilder.DistributionBuilder
++default_tagger = tito.tagger.ReleaseTagger
++
+ [buildconfig]
+ builder = tito.builder.Builder
+ tagger = tito.tagger.VersionTagger
+-changelog_do_not_remove_cherrypick = 0
+-changelog_format = %s (%ae)
+diff --git a/scripts/test_hwprobe.sh b/scripts/test_hwprobe.sh
+index 7b309f5..f522058 100755
+--- a/scripts/test_hwprobe.sh
++++ b/scripts/test_hwprobe.sh
+@@ -14,13 +14,12 @@
+ #
+ #    ./test_hwprobe.sh /path/to/socket-count-test-data/dumps/
+ #
+-
+-SYS_DUMPS_PATH="$1"
++SYS_DUMPS_PATH="${1:-$HOME/src/socket-count-test-data/dumps}"
+ SYS_DUMPS=$(find "${SYS_DUMPS_PATH}" -mindepth 1 -maxdepth 1 -type d)
+ 
+ for sys_dump in ${SYS_DUMPS}
+ do
+     echo "sys_dump: ${sys_dump}"
+-    python src/subscription_manager/hwprobe.py "${sys_dump}"
++    sudo PYTHONPATH=src/ python src/subscription_manager/hwprobe.py "${sys_dump}"
+     echo
+ done
+diff --git a/src/subscription_manager/cpuinfo.py b/src/subscription_manager/cpuinfo.py
+index 9593fd7..f778cd4 100644
+--- a/src/subscription_manager/cpuinfo.py
++++ b/src/subscription_manager/cpuinfo.py
+@@ -77,6 +77,9 @@
+ # factory to init proper one based... uname.machine? 'arch' file?
+ 
+ import collections
++import itertools
++import logging
++import os
+ 
+ # mostly populated from the arm CPUID instruction
+ # http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0432c/Bhccjgga.html
+@@ -101,9 +104,41 @@ import collections
+ # stepping    : 7
+ # microcode   : 0x710
+ 
++log = logging.getLogger('rhsm-app.' + __name__)
++
++
++class DefaultCpuFields(object):
++    """Maps generic cpuinfo fields to the corresponding field from ProcessorModel.
++
++    For, a cpu MODEL (a number or string that the cpu vendor assigns to that model of
++    cpu, '45' for an intel Xeon for example)
++    is in the 'model' field in /proc/cpuinfo, and the
++    'model' in the sluggified field in X86_64ProcessorModel. For aarch64,
++    the field 'cpu_part' is it's MODEL.
++    """
++    MODEL_NAME = "model_name"
++    MODEL = "model"
++
++
++class X86_64Fields(object):
++    MODEL_NAME = 'model_name'
++    MODEL = 'model'
++
++
++class Aarch64Fields(object):
++    MODEL = 'cpu_part'
++    MODEL_NAME = 'model_name'
++
++
++class Ppc64Fields(object):
++    MODEL = 'model'
++    MODEL_NAME = 'machine'
++
+ 
+ # represent the data in /proc/cpuinfo, which may include multiple processors
+ class CpuinfoModel(object):
++    fields_class = DefaultCpuFields
++
+     def __init__(self, cpuinfo_data=None):
+         # The contents of /proc/cpuinfo
+         self.cpuinfo_data = cpuinfo_data
+@@ -116,7 +151,7 @@ class CpuinfoModel(object):
+ 
+         # If were going to pretend all the cpus are the same,
+         # what do they all have in common.
+-        self.common = None
++        self.common = {}
+ 
+         # model name    : Intel(R) Core(TM) i5 CPU       M 560  @ 2.67GHz
+         self._model_name = None
+@@ -131,11 +166,23 @@ class CpuinfoModel(object):
+ 
+     @property
+     def model_name(self):
+-        return self._model_name
++        if self._model_name:
++            return self._model_name
++
++        if not self.common:
++            return None
++
++        return self.common.get(self.fields_class.MODEL_NAME, None)
+ 
+     @property
+     def model(self):
+-        return self._model
++        if self._model:
++            return self._model
++
++        if not self.common:
++            return None
++
++        return self.common.get(self.fields_class.MODEL, None)
+ 
+     def __str__(self):
+         lines = []
+@@ -151,29 +198,6 @@ class CpuinfoModel(object):
+         return "\n".join(lines)
+ 
+ 
+-class AbstractCpuFields(object):
+-    """Maps generic cpuinfo fields to the corresponding field from ProcessorModel.
+-
+-    For, a cpu MODEL (a number or string that the cpu vendor assigns to that model of
+-    cpu, '45' for an intel Xeon for example)
+-    is in the 'model' field in /proc/cpuinfo, and the
+-    'model' in the sluggified field in X86_64ProcessorModel. For aarch64,
+-    the field 'cpu_part' is it's MODEL.
+-    """
+-    MODEL_NAME = "model_name"
+-    MODEL = "model"
+-
+-
+-class X86_64Fields(object):
+-    MODEL_NAME = 'model_name'
+-    MODEL = 'model'
+-
+-
+-class Aarch64Fields(object):
+-    MODEL = 'cpu_part'
+-    MODEL_NAME = 'model_name'
+-
+-
+ class Aarch64ProcessorModel(dict):
+     "The info corresponding to the info about each aarch64 processor entry in cpuinfo"
+     pass
+@@ -184,30 +208,29 @@ class X86_64ProcessorModel(dict):
+     pass
+ 
+ 
+-class X86_64CpuinfoModel(CpuinfoModel):
+-    pass
++class Ppc64ProcessorModel(dict):
++    "The info corresponding to the info about each ppc64 processor entry in cpuinfo"
++    @classmethod
++    def from_stanza(cls, stanza):
++        cpu_data = cls()
++        cpu_data.update(dict([fact_sluggify_item(item) for item in stanza]))
++        return cpu_data
+ 
+ 
+-class Aarch64CpuinfoModel(CpuinfoModel):
+-    @property
+-    def model_name(self):
+-        if self._model_name:
+-            return self._model_name
++class X86_64CpuinfoModel(CpuinfoModel):
++    """The model for all the cpuinfo data for all processors on the machine.
+ 
+-        if not self.common:
+-            return None
++    ie, all the data in /proc/cpuinfo field as opposed to X86_64ProcessModel which
++    is the info for 1 processor."""
++    fields_class = X86_64Fields
+ 
+-        return self.common.get(Aarch64Fields.MODEL, None)
+ 
+-    @property
+-    def model(self):
+-        if self._model:
+-            return self._model
++class Ppc64CpuinfoModel(CpuinfoModel):
++    fields_class = Ppc64Fields
+ 
+-        if not self.common:
+-            return None
+ 
+-        return self.common.get(Aarch64Fields.MODEL_NAME, None)
++class Aarch64CpuinfoModel(CpuinfoModel):
++    fields_class = Aarch64Fields
+ 
+ 
+ def fact_sluggify(key):
+@@ -247,6 +270,54 @@ def line_splitter(line):
+     return None
+ 
+ 
++def accumulate_fields(fields_accum, fields):
++    for field in fields:
++        fields_accum.add(field)
++    return fields_accum
++
++
++def find_shared_key_value_pairs(all_fields, processors):
++    # smashem, last one wins
++    smashed = collections.defaultdict(set)
++
++    # build a dict of fieldname -> list of all the different values
++    # so we can dump the variant ones.
++    for field in all_fields:
++        for k, v in [(field, processor.get(field)) for processor in processors]:
++            if v is None:
++                continue
++            smashed[k].add(v)
++
++    # remove fields that can't be smashed to one value
++    common_cpu_info = dict([(x, smashed[x].pop()) for x in smashed if len(smashed[x]) == 1])
++    return common_cpu_info
++
++
++def split_kv_list_by_field(kv_list, field):
++    """Split the iterable kv_list into chunks by field.
++
++    For a list with repeating stanzas in it, this will
++    return a generate that will return each chunk.
++
++    For something like /proc/cpuinfo, called with
++    field 'processor', each stanza is a different cpu.
++    """
++    current_stanza = None
++    for key, value in kv_list:
++        if key == field:
++            if current_stanza:
++                yield current_stanza
++            current_stanza = [(key, value)]
++            continue
++
++        # if we have garbage in and no start to processor info
++        if current_stanza:
++            current_stanza.append((key, value))
++
++    # end of kv_list
++    if current_stanza:
++        yield current_stanza
++
+ """
+ Processor   : AArch64 Processor rev 0 (aarch64)
+ processor   : 0
+@@ -267,30 +338,34 @@ CPU revision    : 0
+ Hardware    : APM X-Gene Mustang board
+ """
+ 
+-# TODO: This class is kind of a working sketch, it doesn't make a lot of sense
+-#       atm.
+-#
+-# FIXME: Intention was to try to make these classes somewhat functional
+ 
++class BaseCpuInfo(object):
++    @classmethod
++    def from_proc_cpuinfo_string(cls, proc_cpuinfo_string):
++        """Return a BaseCpuInfo subclass based on proc_cpuinfo_string.
++
++        proc_cpuinfo_string is the string resulting from reading
++        the entire contents of /proc/cpuinfo."""
++        cpu_info = cls()
++        cpu_info._parse(proc_cpuinfo_string)
+ 
+-class Aarch64CpuInfo(object):
++        return cpu_info
++
++
++class Aarch64CpuInfo(BaseCpuInfo):
+     def __init__(self):
+         self.cpu_info = Aarch64CpuinfoModel()
+ 
+-    @classmethod
+-    def from_proc_cpuinfo_string(cls, proc_cpuinfo_string):
+-        aarch64_cpu_info = cls()
+-        aarch64_cpu_info._parse(proc_cpuinfo_string)
++    def _parse(self, cpuinfo_data):
++        raw_kv_iter = split_key_value_generator(cpuinfo_data, line_splitter)
+ 
+-        return aarch64_cpu_info
++        # Yes, there is a 'Processor' field and multiple lower case 'processor'
++        # fields.
++        kv_iter = (self._capital_processor_to_model_name(item)
++                   for item in raw_kv_iter)
++
++        slugged_kv_list = [fact_sluggify_item(item) for item in kv_iter]
+ 
+-    def _parse(self, cpuinfo_data):
+-        kv_iter = split_key_value_generator(cpuinfo_data, line_splitter)
+-        kv_list = [x for x in kv_iter]
+-        # Yes, there is a 'Processor' field and a 'processor' field, so
+-        # if 'Processor' exists, we use it as the model name
+-        kv_list = self._cap_processor_to_model_name_filter(kv_list)
+-        slugged_kv_list = self._fact_sluggify_item_filter(kv_list)
+         # kind of duplicated
+         self.cpu_info.common = self.gather_cpu_info_model(slugged_kv_list)
+         self.cpu_info.processors = self.gather_processor_list(slugged_kv_list)
+@@ -298,19 +373,15 @@ class Aarch64CpuInfo(object):
+         # For now, 'hardware' is per
+         self.cpu_info.other = self.gather_cpu_info_other(slugged_kv_list)
+ 
+-    def _fact_sluggify_item_filter(self, kv_list):
+-        return [fact_sluggify_item(item)
+-                for item in kv_list]
++    def _capital_processor_to_model_name(self, item):
++        """Use the uppercase Processor field value as the model name.
+ 
+-    def _cap_processor_to_model_name(self, item):
++        For aarch64, the 'Processor' field is the closest to model name,
++        so we sub it in now."""
+         if item[0] == 'Processor':
+             item[0] = "model_name"
+         return item
+ 
+-    def _cap_processor_to_model_name_filter(self, kv_list):
+-        return [self._cap_processor_to_model_name(item)
+-                for item in kv_list]
+-
+     def gather_processor_list(self, kv_list):
+         processor_list = []
+         for k, v in kv_list:
+@@ -341,100 +412,78 @@ class Aarch64CpuInfo(object):
+         return cpu_data
+ 
+ 
+-class X86_64CpuInfo(object):
++class X86_64CpuInfo(BaseCpuInfo):
+     def __init__(self):
+         self.cpu_info = X86_64CpuinfoModel()
+ 
+-    @classmethod
+-    def from_proc_cpuinfo_string(cls, proc_cpuinfo_string):
+-        x86_64_cpu_info = cls()
+-        x86_64_cpu_info._parse(proc_cpuinfo_string)
+-
+-        return x86_64_cpu_info
+-
+     def _parse(self, cpuinfo_data):
+         # ordered list
+-        #kv_list = self._key_value_list(cpuinfo_data)
+         kv_iter = split_key_value_generator(cpuinfo_data, line_splitter)
+ 
+         processors = []
+         all_fields = set()
+-        for processor_stanza in self._split_by_processor(kv_iter):
++        for processor_stanza in split_kv_list_by_field(kv_iter, 'processor'):
+             proc_dict = self.processor_stanza_to_processor_data(processor_stanza)
+-            #pp(proc_dict)
+             processors.append(proc_dict)
+-
+             # keep track of fields as we see them
+-            all_fields = self._track_fields(all_fields, proc_dict.keys())
++            all_fields = accumulate_fields(all_fields, proc_dict.keys())
+ 
+-        self.cpu_info.common = self.find_shared_key_value_pairs(all_fields, processors)
++        self.cpu_info.common = find_shared_key_value_pairs(all_fields, processors)
+         self.cpu_info.processors = processors
+         self.cpu_info.cpuinfo_data = cpuinfo_data
+ 
+-    def _track_fields(self, fields_accum, fields):
+-        for field in fields:
+-            fields_accum.add(field)
+-        return fields_accum
+-
+-    def find_shared_key_value_pairs(self, all_fields, processors):
+-        # smashem, last one wins
+-        smashed = collections.defaultdict(set)
+-
+-        # build a dict of fieldname -> list of all the different values
+-        # so we can dump the variant ones.
+-        for field in all_fields:
+-            for k, v in [(field, processor.get(field)) for processor in processors]:
+-                if v is None:
+-                    continue
+-                smashed[k].add(v)
+-
+-        # remove fields that can't be smashed to one value
+-        common_cpu_info = dict([(x, smashed[x].pop()) for x in smashed if len(smashed[x]) == 1])
+-        return common_cpu_info
+-
+     def processor_stanza_to_processor_data(self, stanza):
+         "Take a list of k,v tuples, sluggify name, and add to a dict."
+         cpu_data = X86_64ProcessorModel()
+         cpu_data.update(dict([fact_sluggify_item(item) for item in stanza]))
+         return cpu_data
+ 
+-    def _split_by_processor(self, kv_list):
+-        current_cpu = None
+-        for key, value in kv_list:
+-            if key == 'processor':
+-                if current_cpu:
+-                    yield current_cpu
+-                current_cpu = [(key, value)]
+-                continue
+ 
+-            # if we have garbage in and no start to processor info
+-            if current_cpu:
+-                current_cpu.append((key, value))
++class Ppc64CpuInfo(BaseCpuInfo):
++    def __init__(self):
++        self.cpu_info = Ppc64CpuinfoModel()
++
++    def _parse(self, cpuinfo_data):
++        kv_iter = split_key_value_generator(cpuinfo_data, line_splitter)
++
++        processor_iter = itertools.takewhile(self._not_timebase_key, kv_iter)
++        for processor_stanza in split_kv_list_by_field(processor_iter, 'processor'):
++            proc_dict = Ppc64ProcessorModel.from_stanza(processor_stanza)
++            self.cpu_info.processors.append(proc_dict)
++
++        # Treat the rest of the info as shared between all of the processor entries
++        # kv_iter is the rest of cpuinfo that isn't processor stanzas
++        self.cpu_info.common = dict([fact_sluggify_item(item) for item in kv_iter])
++        self.cpu_info.cpuinfo_data = cpuinfo_data
+ 
+-        # end of kv_list
+-        if current_cpu:
+-            yield current_cpu
++    def _not_timebase_key(self, item):
++        return item[0] != 'timebase'
+ 
+ 
+ class SystemCpuInfoFactory(object):
+     uname_to_cpuinfo = {'x86_64': X86_64CpuInfo,
+-                        'aarch64': Aarch64CpuInfo}
++                        'aarch64': Aarch64CpuInfo,
++                        'ppc64': Ppc64CpuInfo,
++                        'ppc64le': Ppc64CpuInfo}
+     proc_cpuinfo_path = '/proc/cpuinfo'
+ 
+     @classmethod
+-    def from_uname_machine(cls, uname_machine):
++    def from_uname_machine(cls, uname_machine, prefix=None):
+         if uname_machine not in SystemCpuInfoFactory.uname_to_cpuinfo:
+             # er?
+             raise NotImplementedError
+ 
+-        proc_cpuinfo_string = cls.open_proc_cpuinfo()
++        proc_cpuinfo_string = cls.open_proc_cpuinfo(prefix)
+ 
+         arch_class = cls.uname_to_cpuinfo[uname_machine]
+         return arch_class.from_proc_cpuinfo_string(proc_cpuinfo_string)
+ 
+     @classmethod
+-    def open_proc_cpuinfo(cls):
++    def open_proc_cpuinfo(cls, prefix=None):
++        proc_cpuinfo_path = cls.proc_cpuinfo_path
++        if prefix:
++            proc_cpuinfo_path = os.path.join(prefix, cls.proc_cpuinfo_path[1:])
+         proc_cpuinfo_buf = ''
+-        with open(cls.proc_cpuinfo_path, 'r') as proc_cpuinfo_f:
++        with open(proc_cpuinfo_path, 'r') as proc_cpuinfo_f:
+             proc_cpuinfo_buf = proc_cpuinfo_f.read()
+         return proc_cpuinfo_buf
+diff --git a/src/subscription_manager/gui/data/glade/selectsla.glade b/src/subscription_manager/gui/data/glade/selectsla.glade
+index 782783d..f4dd004 100644
+--- a/src/subscription_manager/gui/data/glade/selectsla.glade
++++ b/src/subscription_manager/gui/data/glade/selectsla.glade
+@@ -101,6 +101,7 @@
+             <property name="use_markup">True</property>
+             <property name="single_line_mode">True</property>
+             <property name="max_width_chars">32</property>
++            <property name="width_request">520</property>
+           </object>
+           <packing>
+             <property name="y_options">GTK_EXPAND</property>
+diff --git a/src/subscription_manager/hwprobe.py b/src/subscription_manager/hwprobe.py
+index 08bd7a8..b65c972 100644
+--- a/src/subscription_manager/hwprobe.py
++++ b/src/subscription_manager/hwprobe.py
+@@ -114,6 +114,10 @@ class Hardware:
+         self.testing = testing or False
+ 
+         self.no_dmi_arches = ['s390x', 'ppc64', 'ppc64le', 'ppc']
++
++        # ppc64 LPAR has it's virt.uuid in /proc/devicetree
++        self.devicetree_vm_uuid_arches = ['ppc64', 'ppc64le']
++
+         # we need this so we can decide which of the
+         # arch specific code bases to follow
+         self.arch = self.get_arch()
+@@ -394,9 +398,8 @@ class Hardware:
+         proc_cpuinfo = {}
+         fact_namespace = 'proc_cpuinfo'
+ 
+-        # FIXME: This is still pretty ugly for what seems so simple.
+-        uname_machine = self.unameinfo['uname.machine']
+-        proc_cpuinfo_source = cpuinfo.SystemCpuInfoFactory.from_uname_machine(uname_machine)
++        proc_cpuinfo_source = cpuinfo.SystemCpuInfoFactory.from_uname_machine(self.arch,
++                                                                              prefix=self.prefix)
+ 
+         for key, value in proc_cpuinfo_source.cpu_info.common.items():
+             proc_cpuinfo['%s.common.%s' % (fact_namespace, key)] = value
+@@ -827,12 +830,20 @@ class Hardware:
+             log.warn(_("Error finding UUID: %s"), e)
+             return  # nothing more to do
+ 
+-        #most virt platforms record UUID via DMI/SMBIOS info.
+-        if 'dmi.system.uuid' in self.allhw:
++        # most virt platforms record UUID via DMI/SMBIOS info.
++        # But only for guests, otherwise it's physical system uuid.
++        if self.allhw.get('virt.is_guest') and 'dmi.system.uuid' in self.allhw:
+             self.allhw['virt.uuid'] = self.allhw['dmi.system.uuid']
+ 
+-        #potentially override DMI-determined UUID with
+-        #what is on the file system (xen para-virt)
++        # For ppc64, virt uuid is in /proc/device-tree/vm,uuid
++        # just the uuid in txt, one line
++
++        # ie, ppc64/ppc64le
++        if self.arch in self.devicetree_vm_uuid_arches:
++            self.allhw.update(self._get_devicetree_vm_uuid())
++
++        # potentially override DMI-determined UUID with
++        # what is on the file system (xen para-virt)
+         try:
+             uuid_file = open('/sys/hypervisor/uuid', 'r')
+             uuid = uuid_file.read()
+@@ -841,6 +852,28 @@ class Hardware:
+         except IOError:
+             pass
+ 
++    def _get_devicetree_vm_uuid(self):
++        """Collect the virt.uuid fact from device-tree/vm,uuid
++
++        For ppc64/ppc64le systems running KVM or PowerKVM, the
++        virt uuid is found in /proc/device-tree/vm,uuid.
++
++        (In contrast to use of DMI on x86_64)."""
++
++        virt_dict = {}
++
++        vm_uuid_path = "%s/proc/device-tree/vm,uuid" % self.prefix
++
++        try:
++            with open(vm_uuid_path) as fo:
++                contents = fo.read()
++                vm_uuid = contents.strip()
++                virt_dict['virt.uuid'] = vm_uuid
++        except IOError, e:
++            log.warn("Tried to read %s but there was an error: %s", vm_uuid_path, e)
++
++        return virt_dict
++
+     def log_platform_firmware_warnings(self):
+         "Log any warnings from firmware info gather,and/or clear them."
+         self.get_platform_specific_info_provider().log_warnings()
+@@ -867,10 +900,9 @@ class Hardware:
+                 log.warn("%s" % hardware_method)
+                 log.warn("Hardware detection failed: %s" % e)
+ 
+-        #we need to know the DMI info and VirtInfo before determining UUID.
+-        #Thus, we can't figure it out within the main data collection loop.
+-        if self.allhw.get('virt.is_guest'):
+-            self.get_virt_uuid()
++        # we need to know the DMI info and VirtInfo before determining UUID.
++        # Thus, we can't figure it out within the main data collection loop.
++        self.get_virt_uuid()
+ 
+         log.info("collected virt facts: virt.is_guest=%s, virt.host_type=%s, virt.uuid=%s",
+                  self.allhw.get('virt.is_guest', 'Not Set'),
+diff --git a/subscription-manager.spec b/subscription-manager.spec
+index eeee819..8933e79 100644
+--- a/subscription-manager.spec
++++ b/subscription-manager.spec
+@@ -62,7 +62,7 @@
+ 
+ Name: subscription-manager
+ Version: 1.16.8
+-Release: 1%{?dist}
++Release: 2%{?dist}
+ Summary: Tools and libraries for subscription and repository management
+ Group:   System Environment/Base
+ License: GPLv2
+@@ -577,6 +577,12 @@ fi
+ %endif
+ 
+ %changelog
++* Tue Feb 09 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-2
++- 1300259: Select service level label no longer overlaps dropdown box
++  (csnyder@redhat.com)
++- 1300816: Add proc_cpuinfo facts for ppc64/le (alikins@redhat.com)
++- 1300805: Add support for ppc64 virt.uuid (alikins@redhat.com)
++
+ * Tue Jan 19 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-1
+ - 1298586: Message needed for remove only invalid pool (wpoteat@redhat.com)
+ - 1046132: rhsm_icon uses status from check_status (alikins@redhat.com)
+diff --git a/test/data/cpuinfo/ppc64-power8-160cpu-powernv b/test/data/cpuinfo/ppc64-power8-160cpu-powernv
+new file mode 100644
+index 0000000..6a4360e
+--- /dev/null
++++ b/test/data/cpuinfo/ppc64-power8-160cpu-powernv
+@@ -0,0 +1,805 @@
++processor	: 0
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 1
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 2
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 3
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 4
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 5
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 6
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 7
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 8
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 9
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 10
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 11
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 12
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 13
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 14
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 15
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 16
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 17
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 18
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 19
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 20
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 21
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 22
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 23
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 24
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 25
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 26
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 27
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 28
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 29
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 30
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 31
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 32
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 33
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 34
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 35
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 36
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 37
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 38
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 39
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 40
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 41
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 42
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 43
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 44
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 45
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 46
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 47
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 48
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 49
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 50
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 51
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 52
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 53
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 54
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 55
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 56
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 57
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 58
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 59
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 60
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 61
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 62
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 63
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 64
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 65
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 66
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 67
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 68
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 69
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 70
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 71
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 72
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 73
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 74
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 75
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 76
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 77
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 78
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 79
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 80
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 81
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 82
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 83
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 84
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 85
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 86
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 87
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 88
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 89
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 90
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 91
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 92
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 93
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 94
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 95
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 96
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 97
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 98
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 99
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 100
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 101
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 102
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 103
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 104
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 105
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 106
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 107
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 108
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 109
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 110
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 111
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 112
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 113
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 114
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 115
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 116
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 117
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 118
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 119
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 120
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 121
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 122
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 123
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 124
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 125
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 126
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 127
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 128
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 129
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 130
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 131
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 132
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 133
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 134
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 135
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 136
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 137
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 138
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 139
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 140
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 141
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 142
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 143
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 144
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 145
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 146
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 147
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 148
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 149
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 150
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 151
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 152
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 153
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 154
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 155
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 156
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 157
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 158
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 159
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++timebase	: 512000000
++platform	: PowerNV
++model		: 8247-22L
++machine		: PowerNV 8247-22L
++firmware	: OPAL v3
+diff --git a/test/data/cpuinfo/ppc64-power8-16cpu-kvm b/test/data/cpuinfo/ppc64-power8-16cpu-kvm
+new file mode 100644
+index 0000000..3871ae6
+--- /dev/null
++++ b/test/data/cpuinfo/ppc64-power8-16cpu-kvm
+@@ -0,0 +1,84 @@
++processor	: 0
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 1
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 2
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 3
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 4
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 5
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 6
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 7
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 8
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 9
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 10
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 11
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 12
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 13
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 14
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 15
++cpu		: POWER8E (raw), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++timebase	: 512000000
++platform	: pSeries
++model		: IBM pSeries (emulated by qemu)
++machine		: CHRP IBM pSeries (emulated by qemu)
+diff --git a/test/data/cpuinfo/ppc64-power8-powernv b/test/data/cpuinfo/ppc64-power8-powernv
+new file mode 100644
+index 0000000..6a4360e
+--- /dev/null
++++ b/test/data/cpuinfo/ppc64-power8-powernv
+@@ -0,0 +1,805 @@
++processor	: 0
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 1
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 2
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 3
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 4
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 5
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 6
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 7
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 8
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 9
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 10
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 11
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 12
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 13
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 14
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 15
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 16
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 17
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 18
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 19
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 20
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 21
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 22
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 23
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 24
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 25
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 26
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 27
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 28
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 29
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 30
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 31
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 32
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 33
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 34
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 35
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 36
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 37
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 38
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 39
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 40
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 41
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 42
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 43
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 44
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 45
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 46
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 47
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 48
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 49
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 50
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 51
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 52
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 53
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 54
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 55
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 56
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 57
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 58
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 59
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 60
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 61
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 62
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 63
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 64
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 65
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 66
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 67
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 68
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 69
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 70
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 71
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 72
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 73
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 74
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 75
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 76
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 77
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 78
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 79
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 80
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 81
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 82
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 83
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 84
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 85
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 86
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 87
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 88
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 89
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 90
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 91
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 92
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 93
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 94
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 95
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 96
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 97
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 98
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 99
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 100
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 101
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 102
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 103
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 104
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 105
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 106
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 107
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 108
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 109
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 110
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 111
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 112
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 113
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 114
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 115
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 116
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 117
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 118
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 119
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 120
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 121
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 122
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 123
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 124
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 125
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 126
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 127
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 128
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 129
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 130
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 131
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 132
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 133
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 134
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 135
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 136
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 137
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 138
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 139
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 140
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 141
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 142
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 143
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 144
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 145
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 146
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 147
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 148
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 149
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 150
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 151
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 152
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 153
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 154
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 155
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 156
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 157
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 158
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 159
++cpu		: POWER8E (raw), altivec supported
++clock		: 3690.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++timebase	: 512000000
++platform	: PowerNV
++model		: 8247-22L
++machine		: PowerNV 8247-22L
++firmware	: OPAL v3
+diff --git a/test/data/cpuinfo/ppc64le-power8-16cpu-lpar b/test/data/cpuinfo/ppc64le-power8-16cpu-lpar
+new file mode 100644
+index 0000000..d915ded
+--- /dev/null
++++ b/test/data/cpuinfo/ppc64le-power8-16cpu-lpar
+@@ -0,0 +1,84 @@
++processor	: 0
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 1
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 2
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 3
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 4
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 5
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 6
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 7
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 8
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 9
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 10
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 11
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 12
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 13
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 14
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++processor	: 15
++cpu		: POWER8 (architected), altivec supported
++clock		: 3425.000000MHz
++revision	: 2.1 (pvr 004b 0201)
++
++timebase	: 512000000
++platform	: pSeries
++model		: IBM,8247-22L
++machine		: CHRP IBM,8247-22L
+diff --git a/test/test_cpuinfo.py b/test/test_cpuinfo.py
+index ca87912..17e31b0 100644
+--- a/test/test_cpuinfo.py
++++ b/test/test_cpuinfo.py
+@@ -18,7 +18,6 @@ class BaseCpuInfo(fixture.SubManFixture):
+     cpuinfo_class = None
+ 
+     def _test(self, name):
+-        #x86_64-dell_e4310
+         cpud = self._load_cpuinfo(name)
+         exp = self.expected[name]
+ 
+@@ -27,7 +26,9 @@ class BaseCpuInfo(fixture.SubManFixture):
+         if 'cpu_count' in exp:
+             self.assertEquals(exp['cpu_count'], len(x.cpu_info.processors))
+         if 'model' in exp:
+-            self.assertEquals(exp['model'], x.cpu_info.processors[0]['model'])
++            self.assertEquals(exp['model'], x.cpu_info.model)
++        if 'machine' in exp:
++            self.assertEquals(exp['machine'], x.cpu_info.common['machine'])
+ 
+     def _load_cpuinfo(self, name):
+         f = open(os.path.join(cpu_data_dir, name), 'r')
+@@ -64,7 +65,38 @@ class TestX86_64CpuInfo(BaseCpuInfo):
+         self._test('armv7-samsung-1socket-2core-2cpu')
+ 
+ 
+-class TextAarch64CpuInfo(BaseCpuInfo):
++class TestPpc64CpuInfo(BaseCpuInfo):
++    cpuinfo_class = cpuinfo.Ppc64CpuInfo
++    expected = {'ppc64-power8-16cpu-kvm':
++                    {'cpu_count': 16,
++                     'platform': 'pSeries',
++                     'model': 'IBM pSeries (emulated by qemu)'},
++                'ppc64-power8-160cpu-powernv':
++                    {'cpu_count': 160,
++                     'platform': 'powerNV',
++                     'model': '8247-22L'}}
++
++    def test_ppc64_power8_160cpu_powernv(self):
++        self._test('ppc64-power8-160cpu-powernv')
++
++    def test_ppc64_power8_16cpu_kvm(self):
++        self._test('ppc64-power8-16cpu-kvm')
++
++
++class TestPpc64leCpuInfo(BaseCpuInfo):
++    cpuinfo_class = cpuinfo.Ppc64CpuInfo
++    expected = {'ppc64le-power8-16cpu-lpar':
++                {'cpu_count': 16,
++                 'platform': 'pSeries',
++                 'model': 'IBM,8247-22L',
++                 'machine': 'CHRP IBM,8247-22L'}
++              }
++
++    def test_ppc64le_power8_16cpu_lpar(self):
++        self._test('ppc64le-power8-16cpu-lpar')
++
++
++class TestAarch64CpuInfo(BaseCpuInfo):
+     cpuinfo_class = cpuinfo.Aarch64CpuInfo
+     expected = {'aarch64-mustang-dev-rhel7-1socket-8core-8cpu':
+                     {'cpu_count': 8,

@@ -8,15 +8,16 @@ import os
 import tempfile
 import contextlib
 
+
 # for monkey patching config
 import stubs
 
 from subscription_manager import managercli, managerlib
 from subscription_manager.injection import provide, \
         CERT_SORTER, PROD_DIR
-from subscription_manager.managercli import get_installed_product_status
+from subscription_manager.managercli import get_installed_product_status, AVAILABLE_SUBS_MATCH_COLUMNS
 from subscription_manager.printing_utils import format_name, columnize, \
-        _echo, _none_wrap
+        echo_columnize_callback, none_wrap_columnize_callback, highlight_by_filter_string_columnize_callback, FONT_BOLD, FONT_RED, FONT_NORMAL
 from subscription_manager.repolib import Repo
 from stubs import MockStderr, StubProductCertificate, StubEntitlementCertificate, \
         StubConsumerIdentity, StubProduct, StubUEP, StubProductDirectory, StubCertSorter, StubPool
@@ -313,7 +314,7 @@ class TestOwnersCommand(TestCliProxyCommand):
     command_class = managercli.OwnersCommand
 
     def test_main_server_url(self):
-        server_url = "https://subscription.rhn.redhat.com/subscription"
+        server_url = "https://subscription.rhsm.redhat.com/subscription"
         self.cc.main(["--serverurl", server_url])
 
     def test_insecure(self):
@@ -324,7 +325,7 @@ class TestEnvironmentsCommand(TestCliProxyCommand):
     command_class = managercli.EnvironmentsCommand
 
     def test_main_server_url(self):
-        server_url = "https://subscription.rhn.redhat.com/subscription"
+        server_url = "https://subscription.rhsm.redhat.com/subscription"
         self.cc.main(["--serverurl", server_url])
 
     def test_insecure(self):
@@ -369,6 +370,9 @@ class TestRegisterCommand(TestCliProxyCommand):
     def test_keys_and_consumerid(self):
         self._test_exception(["--consumerid", "22", "--activationkey", "key"])
 
+    def test_force_and_consumerid(self):
+        self._test_exception(["--consumerid", "22", "--force"])
+
     def test_key_and_org(self):
         self._test_no_exception(["--activationkey", "key", "--org", "org"])
 
@@ -392,7 +396,7 @@ class TestRegisterCommand(TestCliProxyCommand):
 
     @patch.object(managercli.cfg, "save")
     def test_main_server_url(self, mock_save):
-        server_url = "https://subscription.rhn.redhat.com/subscription"
+        server_url = "https://subscription.rhsm.redhat.com/subscription"
         self._test_no_exception(["--serverurl", server_url])
         mock_save.assert_called_with()
 
@@ -828,7 +832,7 @@ class TestReposCommand(TestCliCommand):
         match_dict_list = Matcher(self.assert_items_equals, expected_overrides)
         self.cc.cp.setContentOverrides.assert_called_once_with('fake_id',
                 match_dict_list)
-        repolib_instance.update.assert_called()
+        self.assertTrue(repolib_instance.update.called)
 
     @mock.patch("subscription_manager.managercli.RepoActionInvoker")
     def test_set_repo_status_with_wildcards(self, mock_repolib):
@@ -845,7 +849,7 @@ class TestReposCommand(TestCliCommand):
         match_dict_list = Matcher(self.assert_items_equals, expected_overrides)
         self.cc.cp.setContentOverrides.assert_called_once_with('fake_id',
                 match_dict_list)
-        repolib_instance.update.assert_called()
+        self.assertTrue(repolib_instance.update.called)
 
     @mock.patch("subscription_manager.managercli.RepoActionInvoker")
     def test_set_repo_status_disable_all_enable_some(self, mock_repolib):
@@ -866,7 +870,7 @@ class TestReposCommand(TestCliCommand):
         match_dict_list = Matcher(self.assert_items_equals, expected_overrides)
         self.cc.cp.setContentOverrides.assert_called_once_with('fake_id',
                 match_dict_list)
-        repolib_instance.update.assert_called()
+        self.assertTrue(repolib_instance.update.called)
 
     @mock.patch("subscription_manager.managercli.RepoActionInvoker")
     def test_set_repo_status_enable_all_disable_some(self, mock_repolib):
@@ -887,7 +891,7 @@ class TestReposCommand(TestCliCommand):
         match_dict_list = Matcher(self.assert_items_equals, expected_overrides)
         self.cc.cp.setContentOverrides.assert_called_once_with('fake_id',
                 match_dict_list)
-        repolib_instance.update.assert_called()
+        self.assertTrue(repolib_instance.update.called)
 
     @mock.patch("subscription_manager.managercli.RepoActionInvoker")
     def test_set_repo_status_enable_all_disable_all(self, mock_repolib):
@@ -907,7 +911,7 @@ class TestReposCommand(TestCliCommand):
         match_dict_list = Matcher(self.assert_items_equals, expected_overrides)
         self.cc.cp.setContentOverrides.assert_called_once_with('fake_id',
                 match_dict_list)
-        repolib_instance.update.assert_called()
+        self.assertTrue(repolib_instance.update.called)
 
     @mock.patch("subscription_manager.managercli.RepoFile")
     def test_set_repo_status_when_disconnected(self, mock_repofile):
@@ -1012,7 +1016,25 @@ class TestAttachCommand(TestCliProxyCommand):
 
     def _test_quantity_exception(self, arg):
         try:
-            self.cc.main(["--auto", "--quantity", arg])
+            self.cc.main(["--pool", "test-pool-id", "--quantity", arg])
+            self.cc._validate_options()
+        except SystemExit, e:
+            self.assertEquals(e.code, os.EX_USAGE)
+        else:
+            self.fail("No Exception Raised")
+
+    def _test_auto_and_quantity_exception(self):
+        try:
+            self.cc.main(["--auto", "--quantity", "6"])
+            self.cc._validate_options()
+        except SystemExit, e:
+            self.assertEquals(e.code, os.EX_USAGE)
+        else:
+            self.fail("No Exception Raised")
+
+    def _test_auto_default_and_quantity_exception(self):
+        try:
+            self.cc.main(["--quantity", "3"])
             self.cc._validate_options()
         except SystemExit, e:
             self.assertEquals(e.code, os.EX_USAGE)
@@ -1029,11 +1051,11 @@ class TestAttachCommand(TestCliProxyCommand):
         self._test_quantity_exception("JarJarBinks")
 
     def test_positive_quantity(self):
-        self.cc.main(["--auto", "--quantity", "1"])
+        self.cc.main(["--pool", "test-pool-id", "--quantity", "1"])
         self.cc._validate_options()
 
     def test_positive_quantity_with_plus(self):
-        self.cc.main(["--auto", "--quantity", "+1"])
+        self.cc.main(["--pool", "test-pool-id", "--quantity", "+1"])
         self.cc._validate_options()
 
     def test_positive_quantity_as_float(self):
@@ -1052,7 +1074,7 @@ class TestAttachCommand(TestCliProxyCommand):
     def test_servicelevel_option_but_no_auto_option(self):
         with self.mock_stdin(open(self.tempfiles[1][1])):
             self.cc.main(["--servicelevel", "Super", "--file", "-"])
-            self.cc._validate_options()
+            self.assertRaises(SystemExit, self.cc._validate_options)
 
     def test_servicelevel_option_with_pool_option(self):
         self.cc.main(["--servicelevel", "Super", "--pool", "1232342342313"])
@@ -1144,6 +1166,18 @@ class TestRemoveCommand(TestCliProxyCommand):
         except SystemExit, e:
             self.assertEquals(e.code, 2)
 
+    def test_validate_access_to_remove_by_pool(self):
+        self.cc.main(["--pool", "a2ee88488bbd32ed8edfa2"])
+        self.cc.cp._capabilities = ["remove_by_pool_id"]
+        self.cc._validate_options()
+
+    def test_validate_no_access_to_remove_by_pool(self):
+        self.cc.main(["--pool", "a2ee88488bbd32ed8edfa2"])
+        try:
+            self.cc._validate_options()
+        except SystemExit, e:
+            self.assertEquals(e.code, 69)
+
 
 class TestUnSubscribeCommand(TestRemoveCommand):
     command_class = managercli.UnSubscribeCommand
@@ -1189,7 +1223,7 @@ class TestServiceLevelCommand(TestCliProxyCommand):
         self.cc.cp = StubUEP()
 
     def test_main_server_url(self):
-        server_url = "https://subscription.rhn.redhat.com/subscription"
+        server_url = "https://subscription.rhsm.redhat.com/subscription"
         self.cc.main(["--serverurl", server_url])
 
     def test_insecure(self):
@@ -1563,9 +1597,56 @@ class TestFormatName(unittest.TestCase):
         self.assertEquals("\t" * 4, new_name[0:4])
 
 
+class TestHighlightByFilter(unittest.TestCase):
+    def test_highlight_by_filter_string(self):
+        args = ['Super Test Subscription']
+        kwargs = {"filter_string": "Super*",
+                  "match_columns": AVAILABLE_SUBS_MATCH_COLUMNS,
+                  "caption": "Subscription Name:",
+                  "is_atty": True}
+        result = highlight_by_filter_string_columnize_callback("Subscription Name:    %s", *args, **kwargs)
+        self.assertEquals(result, 'Subscription Name:    ' + FONT_BOLD + FONT_RED + 'Super Test Subscription' + FONT_NORMAL)
+
+    def test_highlight_by_filter_string_single(self):
+        args = ['Super Test Subscription']
+        kwargs = {"filter_string": "*Subscriptio?",
+                  "match_columns": AVAILABLE_SUBS_MATCH_COLUMNS,
+                  "caption": "Subscription Name:",
+                  "is_atty": True}
+        result = highlight_by_filter_string_columnize_callback("Subscription Name:    %s", *args, **kwargs)
+        self.assertEquals(result, 'Subscription Name:    ' + FONT_BOLD + FONT_RED + 'Super Test Subscription' + FONT_NORMAL)
+
+    def test_highlight_by_filter_string_all(self):
+        args = ['Super Test Subscription']
+        kwargs = {"filter_string": "*",
+                  "match_columns": AVAILABLE_SUBS_MATCH_COLUMNS,
+                  "caption": "Subscription Name:",
+                  "is_atty": True}
+        result = highlight_by_filter_string_columnize_callback("Subscription Name:    %s", *args, **kwargs)
+        self.assertEquals(result, 'Subscription Name:    Super Test Subscription')
+
+    def test_highlight_by_filter_string_exact(self):
+        args = ['Premium']
+        kwargs = {"filter_string": "Premium",
+                  "match_columns": AVAILABLE_SUBS_MATCH_COLUMNS,
+                  "caption": "Service Level:",
+                  "is_atty": True}
+        result = highlight_by_filter_string_columnize_callback("Service Level:    %s", *args, **kwargs)
+        self.assertEquals(result, 'Service Level:    ' + FONT_BOLD + FONT_RED + 'Premium' + FONT_NORMAL)
+
+    def test_highlight_by_filter_string_list_row(self):
+        args = ['Awesome-os-stacked']
+        kwargs = {"filter_string": "Awesome*",
+                  "match_columns": AVAILABLE_SUBS_MATCH_COLUMNS,
+                  "caption": "Subscription Name:",
+                  "is_atty": True}
+        result = highlight_by_filter_string_columnize_callback("    %s", *args, **kwargs)
+        self.assertEquals(result, '    ' + FONT_BOLD + FONT_RED + 'Awesome-os-stacked' + FONT_NORMAL)
+
+
 class TestNoneWrap(unittest.TestCase):
     def test_none_wrap(self):
-        result = _none_wrap('foo %s %s', 'doberman pinscher', None)
+        result = none_wrap_columnize_callback('foo %s %s', 'doberman pinscher', None)
         self.assertEquals(result, 'foo doberman pinscher None')
 
 
@@ -1578,28 +1659,28 @@ class TestColumnize(unittest.TestCase):
         managercli.get_terminal_width = self.old_method
 
     def test_columnize(self):
-        result = columnize(["Hello:", "Foo:"], _echo, "world", "bar")
+        result = columnize(["Hello:", "Foo:"], echo_columnize_callback, "world", "bar")
         self.assertEquals(result, "Hello: world\nFoo:   bar")
 
     def test_columnize_with_list(self):
-        result = columnize(["Hello:", "Foo:"], _echo, ["world", "space"], "bar")
+        result = columnize(["Hello:", "Foo:"], echo_columnize_callback, ["world", "space"], "bar")
         self.assertEquals(result, "Hello: world\n       space\nFoo:   bar")
 
     def test_columnize_with_empty_list(self):
-        result = columnize(["Hello:", "Foo:"], _echo, [], "bar")
+        result = columnize(["Hello:", "Foo:"], echo_columnize_callback, [], "bar")
         self.assertEquals(result, "Hello: \nFoo:   bar")
 
     @patch('subscription_manager.printing_utils.get_terminal_width')
     def test_columnize_with_small_term(self, term_width_mock):
         result = columnize(["Hello Hello Hello Hello:", "Foo Foo Foo Foo:"],
-                _echo, "This is a testing string", "This_is_another_testing_string")
+                echo_columnize_callback, "This is a testing string", "This_is_another_testing_string")
         expected = 'Hello\nHello\nHello\nHello\n:     This\n      is a\n      ' \
                 'testin\n      g\n      string\nFoo\nFoo\nFoo\nFoo:  ' \
                 'This_i\n      s_anot\n      her_te\n      sting_\n      string'
         self.assertNotEquals(result, expected)
         term_width_mock.return_value = 12
         result = columnize(["Hello Hello Hello Hello:", "Foo Foo Foo Foo:"],
-                _echo, "This is a testing string", "This_is_another_testing_string")
+                echo_columnize_callback, "This is a testing string", "This_is_another_testing_string")
         self.assertEquals(result, expected)
 
     def test_format_name_no_break_no_indent(self):
@@ -1635,10 +1716,10 @@ class TestColumnize(unittest.TestCase):
     def test_columnize_multibyte(self, term_width_mock):
         multibyte_str = u"このシステム用に"
         term_width_mock.return_value = 40
-        result = columnize([multibyte_str], _echo, multibyte_str)
+        result = columnize([multibyte_str], echo_columnize_callback, multibyte_str)
         expected = u"このシステム用に このシステム用に"
         self.assertEquals(result, expected)
         term_width_mock.return_value = 14
-        result = columnize([multibyte_str], _echo, multibyte_str)
+        result = columnize([multibyte_str], echo_columnize_callback, multibyte_str)
         expected = u"このシ\nステム\n用に   このシ\n       ステム\n       用に"
         self.assertEquals(result, expected)

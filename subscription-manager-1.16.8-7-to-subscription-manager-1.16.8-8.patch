@@ -1,0 +1,147 @@
+diff --git a/.tito/packages/subscription-manager b/.tito/packages/subscription-manager
+index c9a9f78..048010a 100644
+--- a/.tito/packages/subscription-manager
++++ b/.tito/packages/subscription-manager
+@@ -1 +1 @@
+-1.16.8-7 ./
++1.16.8-8 ./
+diff --git a/po/es_ES.po b/po/es_ES.po
+index cf8fcdd..9e23b66 100644
+--- a/po/es_ES.po
++++ b/po/es_ES.po
+@@ -3,6 +3,7 @@
+ # Gladys Guerrero <gguerrer@redhat.com>, 2015. #zanata
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # Gladys Guerrero <gguerrer@redhat.com>, 2016. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+ "Project-Id-Version: PACKAGE VERSION\n"
+@@ -11,8 +12,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-03-07 06:48-0500\n"
+-"Last-Translator: Gladys Guerrero <gguerrer@redhat.com>\n"
++"PO-Revision-Date: 2016-03-23 04:18-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Spanish (Spain)\n"
+ "Language: es-ES\n"
+ "Plural-Forms: nplurals=2; plural=(n != 1)\n"
+@@ -1405,7 +1406,7 @@ msgstr "Lanzamientos disponibles"
+ 
+ #: ../src/subscription_manager/managercli.py:1431
+ msgid "The ID of the pool to attach (can be specified more than once)"
+-msgstr "El ID del grupo a vincular (puede especificarse más de una vez) "
++msgstr "El ID del grupo a vincular (puede especificarse más de una vez)"
+ 
+ #: ../src/subscription_manager/managercli.py:1433
+ msgid ""
+@@ -5438,7 +5439,7 @@ msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr "Si se requiere, por favor configure su proxy antes de proseguir."
++msgstr "Si se requiere, por favor configure su proxy antes de proseguir. "
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys, author Gladys Guerrero Lozano
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5467,11 +5468,11 @@ msgid ""
+ "with Red Hat to receive software updates and other benefits. "
+ msgstr ""
+ "El asistente lo guiará a través del proceso de registro de su sistema con "
+-"Red Hat para recibir actualizaciones de software y otros beneficios."
++"Red Hat para recibir actualizaciones de software y otros beneficios. "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "Para registrarlo necesitará lo siguiente: "
++msgstr " Para registrarlo necesitará lo siguiente:"
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+ msgid "• A network connection"
+diff --git a/po/ko.po b/po/ko.po
+index f9fd180..4b9c850 100644
+--- a/po/ko.po
++++ b/po/ko.po
+@@ -12,8 +12,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-03-21 03:14-0400\n"
+-"Last-Translator: eukim <eukim@fedoraproject.org>\n"
++"PO-Revision-Date: 2016-03-23 04:14-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Korean\n"
+ "Language: ko\n"
+ "Plural-Forms: nplurals=1; plural=0\n"
+@@ -5273,7 +5273,7 @@ msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr "필요한 경우 다음 단계로 진행하기 전 프록시를 설정하십시오."
++msgstr "필요한 경우 다음 단계로 진행하기 전 프록시를 설정하십시오. "
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5298,11 +5298,11 @@ msgstr "apply_button"
+ msgid ""
+ "This assistant will guide you through the process of registering your system "
+ "with Red Hat to receive software updates and other benefits. "
+-msgstr "다음에서는 소프트웨어 업데이트 및 기타 혜택을 받기 위해 시스템을 Red Hat에 등록하는 절차에 대해 설명합니다."
++msgstr "다음에서는 소프트웨어 업데이트 및 기타 혜택을 받기 위해 시스템을 Red Hat에 등록하는 절차에 대해 설명합니다. "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "다음과 같은 항목이 등록에 필요합니다:"
++msgstr " 다음과 같은 항목이 등록에 필요합니다:"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+diff --git a/po/ru.po b/po/ru.po
+index 66bdd58..1f1f98d 100644
+--- a/po/ru.po
++++ b/po/ru.po
+@@ -11,8 +11,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-03-17 08:46-0400\n"
+-"Last-Translator: ypoyarko <ypoyarko@redhat.com>\n"
++"PO-Revision-Date: 2016-03-23 04:21-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Russian\n"
+ "Language: ru\n"
+ "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+@@ -5444,7 +5444,7 @@ msgid ""
+ "with Red Hat to receive software updates and other benefits. "
+ msgstr ""
+ "Мастер регистрации поможет зарегистрировать вашу систему Red Hat, после чего "
+-"вы сможете воспользоваться всеми преимуществами подписки."
++"вы сможете воспользоваться всеми преимуществами подписки. "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+diff --git a/subscription-manager.spec b/subscription-manager.spec
+index 1f4b735..099658c 100644
+--- a/subscription-manager.spec
++++ b/subscription-manager.spec
+@@ -62,7 +62,7 @@
+ 
+ Name: subscription-manager
+ Version: 1.16.8
+-Release: 7%{?dist}
++Release: 8%{?dist}
+ Summary: Tools and libraries for subscription and repository management
+ Group:   System Environment/Base
+ License: GPLv2
+@@ -577,6 +577,9 @@ fi
+ %endif
+ 
+ %changelog
++* Mon Mar 28 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-8
++- 1303768: Removes whitespace and updates translations (csnyder@redhat.com)
++
+ * Mon Mar 21 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-7
+ - 1303768: Adds updated translations in the KO and RU locales.
+   (csnyder@redhat.com)

@@ -135,6 +135,22 @@ class CacheManager(object):
         """
         Check if data has changed, and push an update if so.
         """
+
+        # The package_upload.py yum plugin from katello-agent will
+        # end up calling this with consumer_uuid=None if the system
+        # is unregistered.
+        if not consumer_uuid:
+            msg = _("consumer_uuid=%s is not a valid consumer_uuid. "
+                    "Not attempting to sync %s cache with server.") % \
+                (consumer_uuid, self.__class__.__name__)
+            log.debug(msg)
+
+            # Raising an exception here would be better, but that is just
+            # going to cause the package_upload plugin to spam yum
+            # output for unregistered systems, and can only be resolved by
+            # registering to rhsm.
+            return 0
+
         log.debug("Checking current system info against cache: %s" % self.CACHE_FILE)
         if self.has_changed() or force:
             log.debug("System data has changed, updating server.")
@@ -268,8 +284,8 @@ class StatusCache(CacheManager):
         Writing to disk means it will be read from memory for the rest of this run.
         """
         threading.Thread(target=super(StatusCache, self).write_cache,
-                         args=[False],
-                         name="WriteCache%s" % self.__class__.__name__).start()
+                         args=[True],
+                         name="WriteCache%sThread" % self.__class__.__name__).start()
         log.debug("Started thread to write cache: %s" % self.CACHE_FILE)
 
     # we override a @classmethod with an instance method in the sub class?
@@ -542,6 +558,33 @@ class PoolTypeCache(object):
 
     def clear(self):
         self.pooltype_map = {}
+
+
+class RhsmIconCache(CacheManager):
+    '''
+    Cache to keep track of last status returned by the StatusCache.
+    This cache is specifically used to ensure RHSM icon pops up only
+    when the status changes.
+    '''
+
+    CACHE_FILE = "/var/lib/rhsm/cache/rhsm_icon.json"
+
+    def __init__(self, data=None):
+        self.data = data or {}
+
+    def to_dict(self):
+        return self.data
+
+    def _load_data(self, open_file):
+        try:
+            self.data = json.loads(open_file.read()) or {}
+            return self.data
+        except IOError:
+            log.error("Unable to read cache: %s" % self.CACHE_FILE)
+        except ValueError:
+            # ignore json file parse errors, we are going to generate
+            # a new as if it didn't exist
+            pass
 
 
 class WrittenOverrideCache(CacheManager):

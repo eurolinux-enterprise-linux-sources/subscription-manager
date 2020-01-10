@@ -1,0 +1,45 @@
+diff --git a/.tito/packages/subscription-manager b/.tito/packages/subscription-manager
+index 494ac40..6248eb1 100644
+--- a/.tito/packages/subscription-manager
++++ b/.tito/packages/subscription-manager
+@@ -1 +1 @@
+-1.16.8-5 ./
++1.16.8-6 ./
+diff --git a/src/subscription_manager/gui/firstboot/rhsm_login.py b/src/subscription_manager/gui/firstboot/rhsm_login.py
+index 7019578..4ed26df 100644
+--- a/src/subscription_manager/gui/firstboot/rhsm_login.py
++++ b/src/subscription_manager/gui/firstboot/rhsm_login.py
+@@ -143,8 +143,8 @@ class moduleClass(module.Module, object):
+         # In firstboot, we leverage the RHN setup proxy settings already
+         # presented to the user, so hide the choose server screen's proxy
+         # text and button. But, if we are standalone, show our versions.
+-        if not self.standalone and False:
+-            screen = self._screens[registergui.CHOOSE_SERVER_PAGE]
++        if not self.standalone:
++            screen = self.register_widget._screens[registergui.CHOOSE_SERVER_PAGE]
+             screen.proxy_frame.destroy()
+ 
+     def focus(self):
+diff --git a/subscription-manager.spec b/subscription-manager.spec
+index a90d05f..309cb9e 100644
+--- a/subscription-manager.spec
++++ b/subscription-manager.spec
+@@ -62,7 +62,7 @@
+ 
+ Name: subscription-manager
+ Version: 1.16.8
+-Release: 5%{?dist}
++Release: 6%{?dist}
+ Summary: Tools and libraries for subscription and repository management
+ Group:   System Environment/Base
+ License: GPLv2
+@@ -577,6 +577,9 @@ fi
+ %endif
+ 
+ %changelog
++* Mon Mar 21 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-6
++- 1315859: Only show one proxy dialog (csnyder@redhat.com)
++
+ * Tue Mar 15 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-5
+ - 1303768: Adds translations from zanata. (csnyder@redhat.com)
+ - 1313631: Registration with one environment proceeds as normal

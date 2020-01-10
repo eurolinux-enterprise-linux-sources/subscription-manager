@@ -35,7 +35,6 @@ def excepthook_base(exc_type, exc_value, exc_traceback):
 sys.excepthook = excepthook_base
 
 import syslog
-import gobject
 import dbus
 import dbus.service
 import dbus.glib
@@ -44,6 +43,10 @@ import traceback
 
 sys.path.append("/usr/share/rhsm")
 
+from subscription_manager import ga_loader
+ga_loader.init_ga()
+
+#from gi.repository import GObject
 log = logging.getLogger("rhsm-app.rhsmd")
 
 from subscription_manager import logutil
@@ -62,17 +65,20 @@ def excepthook_logging(exc_type, exc_value, exc_traceback):
 
 sys.excepthook = excepthook_logging
 
+from subscription_manager.ga import GObject as ga_GObject
 from subscription_manager.injectioninit import init_dep_injection
 init_dep_injection()
 
 from subscription_manager.branding import get_branding
-from subscription_manager.injection import require, IDENTITY, CERT_SORTER
+from subscription_manager.injection import require, IDENTITY, CERT_SORTER, RHSM_ICON_CACHE
+from subscription_manager.cache import RhsmIconCache
 from subscription_manager.hwprobe import ClassicCheck
 from subscription_manager.i18n_optparse import OptionParser, \
     WrappedIndentedHelpFormatter, USAGE
 from subscription_manager.cert_sorter import RHSM_VALID, \
         RHSM_EXPIRED, RHSM_WARNING, RHSM_PARTIALLY_VALID, \
         RHN_CLASSIC, RHSM_REGISTRATION_REQUIRED
+from subscription_manager.utils import print_error
 
 import rhsm.config
 CFG = rhsm.config.initConfig()
@@ -104,8 +110,9 @@ def pre_check_status(force_signal):
         return RHN_CLASSIC
 
     identity = require(IDENTITY)
+    sorter = require(CERT_SORTER)
 
-    if not identity.is_valid():
+    if not identity.is_valid() and not sorter.has_entitlements():
         debug("The system is not currently registered.")
         return RHSM_REGISTRATION_REQUIRED
     return None
@@ -136,7 +143,7 @@ class StatusChecker(dbus.service.Object):
         dbus.service.Object.__init__(self, name, "/EntitlementStatus")
         self.has_run = False
         #this will get set after first invocation
-        self.last_status = None
+        self.rhsm_icon_cache = require(RHSM_ICON_CACHE)
         self.keep_alive = keep_alive
         self.force_signal = force_signal
         self.loop = loop
@@ -152,7 +159,7 @@ class StatusChecker(dbus.service.Object):
     #certain parts of that are async
     def watchdog(self):
         if not self.keep_alive:
-            gobject.idle_add(check_if_ran_once, self, self.loop)
+            ga_GObject.idle_add(check_if_ran_once, self, self.loop)
 
     @dbus.service.method(
         dbus_interface="com.redhat.SubscriptionManager.EntitlementStatus",
@@ -163,15 +170,15 @@ class StatusChecker(dbus.service.Object):
                  2 if close to expiry
         """
         log.debug("D-Bus interface com.redhat.SubscriptionManager.EntitlementStatus.check_status called")
-        ret = check_status(self.force_signal)
-        if (ret != self.last_status):
-            debug("Validity status changed, fire signal")
-            #we send the code out, but no one uses it at this time
-            self.entitlement_status_changed(ret)
-        self.last_status = ret
+        status = check_status(self.force_signal)
+        if (status != self.rhsm_icon_cache._read_cache()):
+            debug("Validity status changed, fire signal in check_status")
+            self.entitlement_status_changed(status)
+        self.rhsm_icon_cache.data = status
+        self.rhsm_icon_cache.write_cache()
         self.has_run = True
         self.watchdog()
-        return ret
+        return status
 
     @dbus.service.method(
             dbus_interface="com.redhat.SubscriptionManager.EntitlementStatus",
@@ -181,10 +188,13 @@ class StatusChecker(dbus.service.Object):
         pre_result = pre_check_status(self.force_signal)
         if pre_result is not None:
             status = pre_result
-        if status != self.last_status:
+        # At comment time, update status is called every time we start the GUI. So we use
+        # a persistant cache to ensure we fire a signal only when the status changes.
+        if (status != self.rhsm_icon_cache._read_cache()):
             debug("Validity status changed, fire signal")
             self.entitlement_status_changed(status)
-        self.last_status = status
+        self.rhsm_icon_cache.data = status
+        self.rhsm_icon_cache.write_cache()
         self.has_run = True
         self.watchdog()
 
@@ -208,7 +218,7 @@ def parse_force_signal(cli_arg):
     elif cli_arg == "registration_required":
         return RHSM_REGISTRATION_REQUIRED
     else:
-        sys.stderr.write("Invalid force option: %s\n" % cli_arg)
+        print_error("Invalid force option: %s" % cli_arg)
         sys.exit(-1)
 
 
@@ -245,7 +255,7 @@ def main():
     force_signal = parse_force_signal(options.force_signal)
 
     if options.immediate and force_signal is None:
-        sys.stderr.write("--immediate must be used with --force-signal\n")
+        print_error("--immediate must be used with --force-signal")
         sys.exit(-2)
 
     global enable_debug
@@ -269,7 +279,7 @@ def main():
                        "This system's subscriptions are about to expire. " +
                        "Please run subscription-manager for more information.")
         elif status == RHN_CLASSIC:
-            log_syslog(syslog.LOG_NOTICE,
+            log_syslog(syslog.LOG_INFO,
                        get_branding().RHSMD_REGISTERED_TO_OTHER)
         elif status == RHSM_REGISTRATION_REQUIRED:
             log_syslog(syslog.LOG_NOTICE,
@@ -289,7 +299,7 @@ def main():
     sys.excepthook = sys.__excepthook__
 
     system_bus = dbus.SystemBus()
-    loop = gobject.MainLoop()
+    loop = ga_GObject.MainLoop()
     checker = StatusChecker(system_bus, options.keep_alive, force_signal, loop)
 
     if options.immediate:

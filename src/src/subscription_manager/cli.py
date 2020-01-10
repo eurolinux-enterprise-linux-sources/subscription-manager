@@ -17,8 +17,9 @@ import gettext
 import os
 import sys
 
-from subscription_manager.printing_utils import columnize, _echo
+from subscription_manager.printing_utils import columnize, echo_columnize_callback
 from subscription_manager.i18n_optparse import OptionParser, WrappedIndentedHelpFormatter
+from subscription_manager.utils import print_error
 
 _ = gettext.gettext
 
@@ -108,7 +109,7 @@ class CLI:
 
     def _do_columnize(self, items_list):
         modules, descriptions = zip(*items_list)
-        print columnize(modules, _echo, *descriptions) + '\n'
+        print columnize(modules, echo_columnize_callback, *descriptions) + '\n'
 
     def _find_best_match(self, args):
         """
@@ -181,8 +182,8 @@ def system_exit(code, msgs=None):
                 msg = "%s" % msg
 
             if isinstance(msg, unicode):
-                sys.stderr.write("%s\n" % msg.encode("utf8"))
+                print_error(msg.encode("utf8"))
             else:
-                sys.stderr.write("%s\n" % msg)
+                print_error(msg)
 
     sys.exit(code)

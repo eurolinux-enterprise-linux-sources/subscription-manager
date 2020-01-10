@@ -49,10 +49,10 @@ port = 8443
 insecure = 1
 ssl_verify_depth = 3
 ca_cert_dir = /etc/rhsm/ca/
-proxy_hostname =
-proxy_port =
-proxy_user =
-proxy_password =
+proxy_hostname = notaproxy.grimlock.usersys.redhat.com
+proxy_port = 3128
+proxy_user = proxy_user
+proxy_password = proxy_password
 
 [rhsm]
 baseurl= https://content.example.com
@@ -302,8 +302,10 @@ class StubCertificateDirectory(EntitlementDirectory):
     def getCerts(self):
         return self.certs
 
+
 # so we can use a less confusing name when we use this stub
-StubEntitlementDirectory = StubCertificateDirectory
+class StubEntitlementDirectory(StubCertificateDirectory):
+    path = "this/is/a/stub/ent/cert/dir"
 
 
 class StubProductDirectory(StubCertificateDirectory, ProductDirectory):
@@ -312,7 +314,7 @@ class StubProductDirectory(StubCertificateDirectory, ProductDirectory):
     Can be used for both entitlement and product directories as needed.
     """
 
-    path = "this/is/a/stub"
+    path = "this/is/a/stub/product/cert/dir"
 
     def __init__(self, certificates=None, pids=None):
         """
@@ -370,7 +372,7 @@ class StubConsumerIdentity(object):
         return ""
 
 
-class StubUEP:
+class StubUEP(object):
     def __init__(self, host=None, ssl_port=None, handler=None,
                  username=None, password=None,
                  proxy_hostname=None, proxy_port=None,
@@ -381,8 +383,13 @@ class StubUEP:
         self.called_unregister_uuid = None
         self.called_unbind_uuid = None
         self.called_unbind_serial = []
+        self.called_unbind_pool_id = []
         self.username = username
         self.password = password
+        self._capabilities = []
+
+    def has_capability(self, capability):
+        return capability in self._capabilities
 
     def supports_resource(self, resource):
         return False
@@ -437,10 +444,13 @@ class StubUEP:
     def unbindBySerial(self, consumer, serial):
         self.called_unbind_serial.append(serial)
 
+    def unbindByPoolId(self, consumer_uuid, pool_id):
+        self.called_unbind_pool_id.append(pool_id)
+
     def getCertificateSerials(self, consumer):
         return []
 
-    def getCompliance(self, uuid):
+    def getCompliance(self, uuid, on_data=None):
         return {}
 
     def getEntitlementList(self, uuid):
@@ -456,8 +466,8 @@ class StubUEP:
         return []
 
 
-class StubBackend:
-    def __init__(self, uep=StubUEP()):
+class StubBackend(object):
+    def __init__(self, uep=None):
         self.cp_provider = StubCPProvider()
         self.entitlement_dir = None
         self.product_dir = None
@@ -466,14 +476,8 @@ class StubBackend:
         self.overrides = None
         self.certlib = None
 
-    def monitor_certs(self, callback):
+    def on_cert_check_timer(self):
         pass
-
-    def monitor_identity(self, callback):
-        pass
-
-    def create_admin_uep(self, username, password):
-        return StubUEP(username, password)
 
     def update(self):
         pass
@@ -513,7 +517,7 @@ class StubFacts(Facts):
         self.server_status = None
 
 
-class StubConsumer:
+class StubConsumer(object):
     def __init__(self):
         self.uuid = None
 
@@ -527,9 +531,9 @@ class StubConsumer:
         return "12341234234"
 
 
-class StubEntActionInvoker:
-    def __init__(self, uep=StubUEP()):
-        self.uep = uep
+class StubEntActionInvoker(object):
+    def __init__(self, uep=None):
+        self.uep = uep or StubUEP()
 
     def update(self):
         pass
@@ -551,10 +555,11 @@ class StubCertSorter(CertSorter):
 
 class StubCPProvider(object):
 
-    consumer_auth_cp = StubUEP()
-    basic_auth_cp = StubUEP()
-    no_auth_cp = StubUEP()
-    content_connection = StubContentConnection()
+    def __init__(self):
+        self.consumer_auth_cp = StubUEP()
+        self.basic_auth_cp = StubUEP()
+        self.no_auth_cp = StubUEP()
+        self.content_connection = StubContentConnection()
 
     def set_connection_info(self,
                 host=None,

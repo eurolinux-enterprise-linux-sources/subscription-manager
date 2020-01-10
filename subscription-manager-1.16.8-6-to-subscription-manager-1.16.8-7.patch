@@ -1,0 +1,425 @@
+diff --git a/.tito/packages/subscription-manager b/.tito/packages/subscription-manager
+index 6248eb1..c9a9f78 100644
+--- a/.tito/packages/subscription-manager
++++ b/.tito/packages/subscription-manager
+@@ -1 +1 @@
+-1.16.8-6 ./
++1.16.8-7 ./
+diff --git a/po/ko.po b/po/ko.po
+index d21b279..f9fd180 100644
+--- a/po/ko.po
++++ b/po/ko.po
+@@ -3,6 +3,7 @@
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # eukim <eukim@fedoraproject.org>, 2015. #zanata
+ # John Sefler <jsefler@redhat.com>, 2016. #zanata
++# eukim <eukim@fedoraproject.org>, 2016. #zanata
+ msgid ""
+ msgstr ""
+ "Project-Id-Version: PACKAGE VERSION\n"
+@@ -11,8 +12,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-03-14 04:13-0400\n"
+-"Last-Translator: John Sefler <jsefler@redhat.com>\n"
++"PO-Revision-Date: 2016-03-21 03:14-0400\n"
++"Last-Translator: eukim <eukim@fedoraproject.org>\n"
+ "Language-Team: Korean\n"
+ "Language: ko\n"
+ "Plural-Forms: nplurals=1; plural=0\n"
+@@ -24,6 +25,7 @@ msgid ""
+ "consumer_uuid=%s is not a valid consumer_uuid. Not attempting to sync %s "
+ "cache with server."
+ msgstr ""
++"consumer_uuid=%s에는 유효한 consumer_uuid가 아닙니다. %s 캐시를 서버와 동기화하려고 시도하지 않습니다."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/cache.py:168
+@@ -60,7 +62,7 @@ msgstr "잘못된 선택을 입력했습니다. 위의 메뉴에서 선택한 
+ #: ../src/subscription_manager/migrate/migrate.py:147
+ #, python-format
+ msgid "Could not read legacy system id at %s"
+-msgstr ""
++msgstr "%s에서 기존 시스템 ID를 읽을 수 없습니다"
+ 
+ #: ../src/subscription_manager/migrate/migrate.py:178
+ msgid "Legacy username: "
+@@ -262,7 +264,7 @@ msgstr "기존 서버에서 시스템 마이그레이션 데이터를 가져올
+ #: ../src/subscription_manager/migrate/migrate.py:652
+ #, python-format
+ msgid "Consumer %s doesn't exist.  Creating new consumer."
+-msgstr "컨슈머 %s가 존재하지 않습니다. 새 컨슈머를 생성하고 있습니다."
++msgstr "소비자 %s가 존재하지 않습니다. 새 소비자를 생성하고 있습니다."
+ 
+ #: ../src/subscription_manager/migrate/migrate.py:659
+ msgid "Attempting to register system to destination server..."
+@@ -775,6 +777,8 @@ msgid ""
+ "Consumer profile \"%s\" has been deleted from the server. You can use "
+ "command clean or unregister to remove local profile."
+ msgstr ""
++"소비자 프로파일 \"%s\"이/가 서버에서 삭제되었습니다. 로컬 프로파일을 삭제하려면 clean 또는 unregister 명령을 "
++"사용합니다."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:534
+@@ -1183,6 +1187,8 @@ msgid ""
+ "with consumerid. Please use --force without --consumerid to re-register or "
+ "use the clean command and try again without --force."
+ msgstr ""
++"오류: consumerid로 등록을 복원하면서 등록을 강제 실행할 수 없습니다. 재등록하려면 --consumerid없이 --force를 "
++"사용하거나 clean 명령을 사용하여 --force 없이 다시 실행합니다."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1054
+@@ -1200,7 +1206,7 @@ msgstr "등록 대상: %s:%s%s"
+ msgid ""
+ "Error: Cannot register with an ID of a Subscription Management Application: "
+ "%s"
+-msgstr ""
++msgstr "오류: 서브스크립션 관리 애플리케이션 ID로 등록할 수 없습니다:  %s"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1107
+@@ -1336,12 +1342,12 @@ msgstr "사용 가능한 릴리즈"
+ 
+ #: ../src/subscription_manager/managercli.py:1431
+ msgid "The ID of the pool to attach (can be specified more than once)"
+-msgstr ""
++msgstr "할당할 풀 ID (한 번 이상 지정할 수 있음)"
+ 
+ #: ../src/subscription_manager/managercli.py:1433
+ msgid ""
+ "Number of subscriptions to attach. May not be used with an auto-attach."
+-msgstr ""
++msgstr "할당할 서브스크립션 수입니다. auto-attach와 함께 사용할 수 없습니다."
+ 
+ #: ../src/subscription_manager/managercli.py:1435
+ msgid ""
+@@ -1353,7 +1359,7 @@ msgstr "이 시스템에 호환 가능한 서브스크립션을 자동 첨부합
+ msgid ""
+ "Automatically attach only subscriptions matching the specified service "
+ "level; only used with --auto"
+-msgstr ""
++msgstr "지정된 서비스 수준에 일치하는 서브스크립션만 자동으로 할당합니다; --auto와만 함께 사용됨"
+ 
+ #: ../src/subscription_manager/managercli.py:1439
+ msgid ""
+@@ -1392,7 +1398,7 @@ msgstr "오류: 수량은 양의 정수이어야 합니다."
+ 
+ #: ../src/subscription_manager/managercli.py:1476
+ msgid "Error: --quantity may not be used with an auto-attach"
+-msgstr ""
++msgstr "오류: --quantity는 auto-attach와 함께 사용할 수 없습니다"
+ 
+ #: ../src/subscription_manager/managercli.py:1487
+ msgid "Error: Received data does not contain any pool IDs."
+@@ -1447,7 +1453,7 @@ msgstr "삭제할 인증서 일련 번호 (한 번 이상 지정할 수 있음)"
+ 
+ #: ../src/subscription_manager/managercli.py:1618
+ msgid "the ID of the pool to remove (can be specified more than once)"
+-msgstr ""
++msgstr "삭제할 풀의 ID (한 번 이상 지정할 수 있음)"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1620
+@@ -1470,22 +1476,24 @@ msgid ""
+ "Error: The registered entitlement server does not support remove --pool.\n"
+ "Instead, use the remove --serial option."
+ msgstr ""
++"오류: 등록된 인타이틀먼트 서버는 remove --pool을 지원하지 않습니다.\n"
++"대신  remove --serial 옵션을 사용합니다."
+ 
+ #: ../src/subscription_manager/managercli.py:1645
+ msgid ""
+ "Error: This command requires that you specify one of --serial, --pool or --"
+ "all."
+-msgstr ""
++msgstr "오류: 이 명령에서는 --serial, --pool 또는 --all 중 하나를 지정해야 합니다."
+ 
+ #: ../src/subscription_manager/managercli.py:1663
+ #, python-format
+ msgid "%s successfully removed at the server:"
+-msgstr ""
++msgstr "%s가 서버에서 삭제되었습니다:"
+ 
+ #: ../src/subscription_manager/managercli.py:1667
+ #, python-format
+ msgid "%s unsuccessfully removed at the server:"
+-msgstr ""
++msgstr "%s가 서버에서 삭제되지 않았습니다:"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1685
+@@ -1582,7 +1590,7 @@ msgstr "인증서를 가져오기하는 동안 오류가 발생했습니다. 자
+ 
+ #: ../src/subscription_manager/managercli.py:1874
+ msgid "View and configure with 'subscription-manager plugins'"
+-msgstr ""
++msgstr "'subscription-manager plugins' 보기 및 설정"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys, author eukim
+ #: ../src/subscription_manager/managercli.py:1878
+@@ -2861,7 +2869,7 @@ msgstr "시스템 등록"
+ #. for the status message.
+ #: ../src/subscription_manager/gui/registergui.py:383
+ msgid "Error during registration."
+-msgstr ""
++msgstr "등록 도중 오류가 발생했습니다."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/registergui.py:655
+@@ -2890,15 +2898,15 @@ msgstr "서브스크립션 첨부"
+ #: ../src/subscription_manager/gui/registergui.py:1049
+ #, python-format
+ msgid "Registering to owner: %s environment: %s"
+-msgstr ""
++msgstr "소유자에 등록 중: %s 환경: %s"
+ 
+ #: ../src/subscription_manager/gui/registergui.py:1071
+ msgid "Unable to unregister"
+-msgstr ""
++msgstr "등록을 해제할 수 없습니다"
+ 
+ #: ../src/subscription_manager/gui/registergui.py:1080
+ msgid "Unregistering"
+-msgstr ""
++msgstr "등록 해제 중"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/registergui.py:1100
+@@ -2958,7 +2966,7 @@ msgstr "설치된 모든 제품에는 유효한 인타이틀먼트가 적용됩
+ #. did we do that when we created GoneException?
+ #: ../src/subscription_manager/gui/registergui.py:1277
+ msgid "Consumer has been deleted."
+-msgstr "컨슈머가 삭제되었습니다."
++msgstr "소비자가 삭제되었습니다."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/registergui.py:1295
+@@ -3456,7 +3464,7 @@ msgstr "UUID"
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/rct/manifest_commands.py:207
+ msgid "Consumer:"
+-msgstr "컨슈머:"
++msgstr "소비자:"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/rct/manifest_commands.py:221
+@@ -5125,7 +5133,7 @@ msgstr "* 수량 조정을 위해 클릭"
+ 
+ #: ../src/subscription_manager/gui/data/glade/register_dialog.glade.h:3
+ msgid "back_button"
+-msgstr ""
++msgstr "back_button"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/register_dialog.glade.h:5
+@@ -5245,25 +5253,27 @@ msgstr "register_notebook"
+ 
+ #: ../po/tmp_ui_links/credentials.ui.glade.h:1
+ msgid "<b>Please enter your Red Hat account information:</b>"
+-msgstr ""
++msgstr "<b>Red Hat 계정 정보를 입력하십시오:</b>"
+ 
+ #: ../po/tmp_ui_links/credentials.ui.glade.h:4
+ msgid ""
+ "<small>Tip: Forgot your login or password? Look it up at http://redhat.com/"
+ "forgot_password</small>"
+ msgstr ""
++"<small>팁: 로그인 또는 암호를 잊어버리셨습니까?  http://redhat.com/forgot_password에서 찾아보십시오</"
++"small>"
+ 
+ #: ../po/tmp_ui_links/credentials.ui.glade.h:5
+ msgid "credentials_grid"
+-msgstr ""
++msgstr "credentials_grid"
+ 
+ #: ../po/tmp_ui_links/credentials.ui.glade.h:12
+ msgid "system_name_grid"
+-msgstr ""
++msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr ""
++msgstr "필요한 경우 다음 단계로 진행하기 전 프록시를 설정하십시오."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5277,6 +5287,8 @@ msgid ""
+ "Awesome OS 14, Awesome OS 14 Super Edition, Awesome Middle Ware For Awesome "
+ "App Platform Awesome Developer Editition"
+ msgstr ""
++"Awesome OS 14, Awesome OS 14 Super Edition, Awesome Middle Ware For Awesome "
++"App Platform Awesome Developer Editition"
+ 
+ #: ../po/tmp_ui_links/repositories.ui.glade.h:5
+ msgid "apply_button"
+@@ -5286,11 +5298,11 @@ msgstr "apply_button"
+ msgid ""
+ "This assistant will guide you through the process of registering your system "
+ "with Red Hat to receive software updates and other benefits. "
+-msgstr ""
++msgstr "다음에서는 소프트웨어 업데이트 및 기타 혜택을 받기 위해 시스템을 Red Hat에 등록하는 절차에 대해 설명합니다."
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr ""
++msgstr "다음과 같은 항목이 등록에 필요합니다:"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+diff --git a/po/ru.po b/po/ru.po
+index b56ca47..66bdd58 100644
+--- a/po/ru.po
++++ b/po/ru.po
+@@ -11,8 +11,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-03-14 05:24-0400\n"
+-"Last-Translator: John Sefler <jsefler@redhat.com>\n"
++"PO-Revision-Date: 2016-03-17 08:46-0400\n"
++"Last-Translator: ypoyarko <ypoyarko@redhat.com>\n"
+ "Language-Team: Russian\n"
+ "Language: ru\n"
+ "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+@@ -4462,7 +4462,7 @@ msgid ""
+ "with Red Hat to receive software updates and other benefits. You will need "
+ "the following to register:"
+ msgstr ""
+-"Помощник выполнит пошаговую регистрацию системы в Red Hat. Для этого "
++"Мастер регистрации поможет зарегистрировать вашу систему Red Hat. Для этого "
+ "необходимо:"
+ 
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:2
+@@ -4513,7 +4513,7 @@ msgstr "_Да, зарегистрироваться сейчас"
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:10
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:12
+ msgid "_No, I prefer to register at a later time."
+-msgstr "Нет, _зарегистрируюсь позже"
++msgstr "_Нет, зарегистрируюсь позже"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:11
+@@ -4551,7 +4551,7 @@ msgstr "Закрыть"
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:15
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:17
+ msgid "<b>Security &amp; Updates:</b>"
+-msgstr "<b>Защита и обновления:</b>"
++msgstr "<b>Защита и обновление</b>"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:16
+@@ -4567,7 +4567,7 @@ msgstr ""
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:17
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:19
+ msgid "<b>Downloads &amp; Upgrades:</b>"
+-msgstr "<b>Загрузки и обновления:</b>"
++msgstr "<b>Загрузки и обновления</b>"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:18
+@@ -4577,13 +4577,13 @@ msgid ""
+ "including new releases."
+ msgstr ""
+ "Загрузите установочные образы Red Hat Enterprise Linux, включая последние "
+-"выпуски."
++"релизы."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:19
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:21
+ msgid "<b>Support:</b>"
+-msgstr "<b>Поддержка:</b>"
++msgstr "<b>Поддержка</b>"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:20
+@@ -4591,13 +4591,15 @@ msgstr "<b>Поддержка:</b>"
+ msgid ""
+ "Access to the technical support experts at Red Hat or Red Hat's partners for "
+ "help with any issues you might encounter with this system."
+-msgstr "Доступ к технической поддержке Red Hat и получение помощи."
++msgstr ""
++"Консультационные услуги и помощь экспертов службы технической поддержки Red "
++"Hat."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:21
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:23
+ msgid "<b>Management:</b>"
+-msgstr "<b>Управление:</b>"
++msgstr "<b>Управление</b>"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:22
+@@ -4612,8 +4614,8 @@ msgid ""
+ "Manage subscriptions and systems registered to Customer Portal via access."
+ "redhat.com or through one of our other subscription management services."
+ msgstr ""
+-"Управление подписками и системами на access.redhat.com и при помощи служб "
+-"управления подписками."
++"Управление подписками и системами на портале access.redhat.com или при "
++"помощи сервисов управления подписками."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys, author ypoyarko
+ #: ../src/subscription_manager/gui/data/glade/registration_info.glade.h:24
+@@ -5441,8 +5443,8 @@ msgid ""
+ "This assistant will guide you through the process of registering your system "
+ "with Red Hat to receive software updates and other benefits. "
+ msgstr ""
+-"Помощник последовательно проведет вас через процесс регистрации системы в "
+-"Red Hat. "
++"Мастер регистрации поможет зарегистрировать вашу систему Red Hat, после чего "
++"вы сможете воспользоваться всеми преимуществами подписки."
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+@@ -5523,9 +5525,9 @@ msgid ""
+ "system must be registered with the Customer Portal. Please enter your Red "
+ "Hat login to ensure your system is up-to-date."
+ msgstr ""
+-"Для поддержки системы в обновленном состоянии необходимо ее зарегистрировать "
+-"на портале пользователей. Введите имя пользователя и пароль Red Hat, чтобы "
+-"проверить наличие обновлений."
++"Для поддержки обновленного состояния системы зарегистрируйте ее на портале "
++"пользователей. Введите имя пользователя и пароль Red Hat, чтобы проверить "
++"наличие обновлений."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/rhsm_icon/rhsm_icon.c:213
+@@ -5662,7 +5664,7 @@ msgstr "Управление подписками Red Hat"
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../etc-conf/rhsm-icon.desktop.in.h:1
+ msgid "Red Hat Subscription Validity Applet"
+-msgstr "Апплет проверки подписок Red Hat"
++msgstr "Апплет подписки Red Hat"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../../../../..//usr/lib64/python2.7/optparse.py:140
+diff --git a/subscription-manager.spec b/subscription-manager.spec
+index 309cb9e..1f4b735 100644
+--- a/subscription-manager.spec
++++ b/subscription-manager.spec
+@@ -62,7 +62,7 @@
+ 
+ Name: subscription-manager
+ Version: 1.16.8
+-Release: 6%{?dist}
++Release: 7%{?dist}
+ Summary: Tools and libraries for subscription and repository management
+ Group:   System Environment/Base
+ License: GPLv2
+@@ -577,6 +577,10 @@ fi
+ %endif
+ 
+ %changelog
++* Mon Mar 21 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-7
++- 1303768: Adds updated translations in the KO and RU locales.
++  (csnyder@redhat.com)
++
+ * Mon Mar 21 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-6
+ - 1315859: Only show one proxy dialog (csnyder@redhat.com)
+ 

@@ -1,0 +1,915 @@
+diff --git a/.tito/packages/subscription-manager b/.tito/packages/subscription-manager
+index ba655ed..494ac40 100644
+--- a/.tito/packages/subscription-manager
++++ b/.tito/packages/subscription-manager
+@@ -1 +1 @@
+-1.16.8-4 ./
++1.16.8-5 ./
+diff --git a/po/de_DE.po b/po/de_DE.po
+index 4aa2323..71957ba 100644
+--- a/po/de_DE.po
++++ b/po/de_DE.po
+@@ -3,6 +3,7 @@
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # hedda <hedda@fedoraproject.org>, 2015. #zanata
+ # jasna <jdimanos@redhat.com>, 2015. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ # Lisa Stemmler <lstemmle@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+@@ -12,8 +13,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-03-01 05:30-0500\n"
+-"Last-Translator: Lisa Stemmler <lstemmle@redhat.com>\n"
++"PO-Revision-Date: 2016-03-14 04:35-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: German (Germany)\n"
+ "Language: de-DE\n"
+ "Plural-Forms: nplurals=2; plural=(n != 1)\n"
+@@ -1707,7 +1708,7 @@ msgstr ""
+ 
+ #: ../src/subscription_manager/managercli.py:1874
+ msgid "View and configure with 'subscription-manager plugins'"
+-msgstr "Mit 'subscription-manager Plugins' anzeigen und konfigurieren"
++msgstr "Mit 'subscription-manager plugins' anzeigen und konfigurieren"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys, author hedda
+ #: ../src/subscription_manager/managercli.py:1878
+@@ -5475,7 +5476,7 @@ msgstr "system_name_grid"
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+ msgstr ""
+-"Falls nötig, konfigurieren Sie bitte Ihren Proxy, bevor Sie fortfahren."
++"Falls nötig, konfigurieren Sie bitte Ihren Proxy, bevor Sie fortfahren. "
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys, author rgromans
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5504,12 +5505,11 @@ msgid ""
+ "with Red Hat to receive software updates and other benefits. "
+ msgstr ""
+ "Dieser Assistent führt Sie durch den Prozess der Registrierung Ihres "
+-"Systemes um Red Hat Software-Updates und andere Vorteile zu erhalten. Sie "
+-"benötigen Folgendes zur Registrierung:"
++"Systemes um Red Hat Software-Updates und andere Vorteile zu erhalten. "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "Für die Registrierung benötigen Sie Folgendes:"
++msgstr " Für die Registrierung benötigen Sie Folgendes:"
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+ msgid "• A network connection"
+diff --git a/po/es_ES.po b/po/es_ES.po
+index 6ac1925..cf8fcdd 100644
+--- a/po/es_ES.po
++++ b/po/es_ES.po
+@@ -2,6 +2,7 @@
+ # John Sefler <jsefler@redhat.com>, 2014. #zanata
+ # Gladys Guerrero <gguerrer@redhat.com>, 2015. #zanata
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
++# Gladys Guerrero <gguerrer@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+ "Project-Id-Version: PACKAGE VERSION\n"
+@@ -10,8 +11,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2015-09-25 02:53-0400\n"
+-"Last-Translator: John Sefler <jsefler@redhat.com>\n"
++"PO-Revision-Date: 2016-03-07 06:48-0500\n"
++"Last-Translator: Gladys Guerrero <gguerrer@redhat.com>\n"
+ "Language-Team: Spanish (Spain)\n"
+ "Language: es-ES\n"
+ "Plural-Forms: nplurals=2; plural=(n != 1)\n"
+@@ -23,6 +24,8 @@ msgid ""
+ "consumer_uuid=%s is not a valid consumer_uuid. Not attempting to sync %s "
+ "cache with server."
+ msgstr ""
++"consumer_uuid=%s no es un consumer_uuid váĺido. No está intentando "
++"sincronizar la memoria caché %s con el servidor."
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys, author Gladys Guerrero Lozano
+ #: ../src/subscription_manager/cache.py:168
+@@ -60,7 +63,7 @@ msgstr "La elección es inválida. Ingrese una elección del menú de arriba."
+ #: ../src/subscription_manager/migrate/migrate.py:147
+ #, python-format
+ msgid "Could not read legacy system id at %s"
+-msgstr ""
++msgstr "No se pudo leer el ID del sistema de legado en %s"
+ 
+ #: ../src/subscription_manager/migrate/migrate.py:178
+ msgid "Legacy username: "
+@@ -801,6 +804,8 @@ msgid ""
+ "Consumer profile \"%s\" has been deleted from the server. You can use "
+ "command clean or unregister to remove local profile."
+ msgstr ""
++"El perfil del consumidor \"%s\" ha sido borrado del servidor. Use el comando "
++"'clean' o cancele el registro para quitar el perfil local."
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys
+ #: ../src/subscription_manager/managercli.py:534
+@@ -1232,6 +1237,9 @@ msgid ""
+ "with consumerid. Please use --force without --consumerid to re-register or "
+ "use the clean command and try again without --force."
+ msgstr ""
++"Error: No se puede forzar el registro al intentar recuperar el registro con "
++"consumerid. Por favor use --force sin --consumerid para registrar o usar el "
++"comando 'clean' y reintente sin --force."
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys
+ #: ../src/subscription_manager/managercli.py:1054
+@@ -1250,6 +1258,8 @@ msgid ""
+ "Error: Cannot register with an ID of a Subscription Management Application: "
+ "%s"
+ msgstr ""
++"Error: No se puede registrar sin un ID de una Subscription Management "
++"Application: %s"
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys
+ #: ../src/subscription_manager/managercli.py:1107
+@@ -1395,12 +1405,13 @@ msgstr "Lanzamientos disponibles"
+ 
+ #: ../src/subscription_manager/managercli.py:1431
+ msgid "The ID of the pool to attach (can be specified more than once)"
+-msgstr ""
++msgstr "El ID del grupo a vincular (puede especificarse más de una vez) "
+ 
+ #: ../src/subscription_manager/managercli.py:1433
+ msgid ""
+ "Number of subscriptions to attach. May not be used with an auto-attach."
+ msgstr ""
++"El número de suscripciones a vincular. No puede usarse con un auto-attach."
+ 
+ #: ../src/subscription_manager/managercli.py:1435
+ msgid ""
+@@ -1415,6 +1426,8 @@ msgid ""
+ "Automatically attach only subscriptions matching the specified service "
+ "level; only used with --auto"
+ msgstr ""
++"Vincula automáticamente solo las suscripciones correspondientes al nivel del "
++"servicio especificado; únicamente se utiliza con --auto"
+ 
+ #: ../src/subscription_manager/managercli.py:1439
+ msgid ""
+@@ -1456,7 +1469,7 @@ msgstr "Error: La cantidad debe ser un entero positivo."
+ 
+ #: ../src/subscription_manager/managercli.py:1476
+ msgid "Error: --quantity may not be used with an auto-attach"
+-msgstr ""
++msgstr "Error: --quantity no se puede utilizar con auto-attach"
+ 
+ #: ../src/subscription_manager/managercli.py:1487
+ msgid "Error: Received data does not contain any pool IDs."
+@@ -1517,7 +1530,7 @@ msgstr ""
+ 
+ #: ../src/subscription_manager/managercli.py:1618
+ msgid "the ID of the pool to remove (can be specified more than once)"
+-msgstr ""
++msgstr "El ID del grupo a retirar (puede especificarse una vez más)"
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys, author Gladys Guerrero Lozano
+ #: ../src/subscription_manager/managercli.py:1620
+@@ -1540,22 +1553,26 @@ msgid ""
+ "Error: The registered entitlement server does not support remove --pool.\n"
+ "Instead, use the remove --serial option."
+ msgstr ""
++"Error: El servidor de derecho registrado no soporta remove --pool.\n"
++"En su lugar, use la opción remove --serial."
+ 
+ #: ../src/subscription_manager/managercli.py:1645
+ msgid ""
+ "Error: This command requires that you specify one of --serial, --pool or --"
+ "all."
+ msgstr ""
++"Error: Este comando requiere que usted especifique  --serial, --pool o --all."
++""
+ 
+ #: ../src/subscription_manager/managercli.py:1663
+ #, python-format
+ msgid "%s successfully removed at the server:"
+-msgstr ""
++msgstr "%s fue correctamente eliminado en el servidor:"
+ 
+ #: ../src/subscription_manager/managercli.py:1667
+ #, python-format
+ msgid "%s unsuccessfully removed at the server:"
+-msgstr ""
++msgstr "%s no se pudo eliminar en el servidor:"
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys, author gguerrer
+ #: ../src/subscription_manager/managercli.py:1685
+@@ -1660,7 +1677,7 @@ msgstr ""
+ 
+ #: ../src/subscription_manager/managercli.py:1874
+ msgid "View and configure with 'subscription-manager plugins'"
+-msgstr ""
++msgstr "Vea y configure con 'subscription-manager plugins'"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys, author Gladys Guerrero
+ #: ../src/subscription_manager/managercli.py:1878
+@@ -3005,7 +3022,7 @@ msgstr "Registrar"
+ #. for the status message.
+ #: ../src/subscription_manager/gui/registergui.py:383
+ msgid "Error during registration."
+-msgstr ""
++msgstr "Error durante el registro."
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys
+ #: ../src/subscription_manager/gui/registergui.py:655
+@@ -3032,15 +3049,15 @@ msgstr "Vinculación de suscripción"
+ #: ../src/subscription_manager/gui/registergui.py:1049
+ #, python-format
+ msgid "Registering to owner: %s environment: %s"
+-msgstr ""
++msgstr "Registrando al propietario: entorno %s : %s"
+ 
+ #: ../src/subscription_manager/gui/registergui.py:1071
+ msgid "Unable to unregister"
+-msgstr ""
++msgstr "No se pudo cancelar el registro"
+ 
+ #: ../src/subscription_manager/gui/registergui.py:1080
+ msgid "Unregistering"
+-msgstr ""
++msgstr "Cancelando el registro"
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys
+ #: ../src/subscription_manager/gui/registergui.py:1100
+@@ -5275,7 +5292,7 @@ msgstr "* Haga clic para ajustar la cantidad"
+ 
+ #: ../src/subscription_manager/gui/data/glade/register_dialog.glade.h:3
+ msgid "back_button"
+-msgstr ""
++msgstr "back_button"
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/register_dialog.glade.h:5
+@@ -5401,25 +5418,27 @@ msgstr "register_notebook"
+ 
+ #: ../po/tmp_ui_links/credentials.ui.glade.h:1
+ msgid "<b>Please enter your Red Hat account information:</b>"
+-msgstr ""
++msgstr "<b>Por favor ingrese su información de cuenta Red Hat:</b>"
+ 
+ #: ../po/tmp_ui_links/credentials.ui.glade.h:4
+ msgid ""
+ "<small>Tip: Forgot your login or password? Look it up at http://redhat.com/"
+ "forgot_password</small>"
+ msgstr ""
++"<small>Consejo: ¿Olvidó su nombre de usuario o contraseña? Búsquelo en http:/"
++"/redhat.com/forgot_password</small>"
+ 
+ #: ../po/tmp_ui_links/credentials.ui.glade.h:5
+ msgid "credentials_grid"
+-msgstr ""
++msgstr "credentials_grid"
+ 
+ #: ../po/tmp_ui_links/credentials.ui.glade.h:12
+ msgid "system_name_grid"
+-msgstr ""
++msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr ""
++msgstr "Si se requiere, por favor configure su proxy antes de proseguir."
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys, author Gladys Guerrero Lozano
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5435,6 +5454,8 @@ msgid ""
+ "Awesome OS 14, Awesome OS 14 Super Edition, Awesome Middle Ware For Awesome "
+ "App Platform Awesome Developer Editition"
+ msgstr ""
++"Awesome OS 14, Awesome OS 14 Super Edition, Awesome Middle Ware For Awesome "
++"App Platform Awesome Developer Edition"
+ 
+ #: ../po/tmp_ui_links/repositories.ui.glade.h:5
+ msgid "apply_button"
+@@ -5445,10 +5466,12 @@ msgid ""
+ "This assistant will guide you through the process of registering your system "
+ "with Red Hat to receive software updates and other benefits. "
+ msgstr ""
++"El asistente lo guiará a través del proceso de registro de su sistema con "
++"Red Hat para recibir actualizaciones de software y otros beneficios."
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr ""
++msgstr "Para registrarlo necesitará lo siguiente: "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+ msgid "• A network connection"
+diff --git a/po/fr.po b/po/fr.po
+index c496d8c..4b523ff 100644
+--- a/po/fr.po
++++ b/po/fr.po
+@@ -2,6 +2,7 @@
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # jcarbone <jcarbone@redhat.com>, 2015. #zanata
+ # samfreemanz <sfriedma@redhat.com>, 2015. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ # samfreemanz <sfriedma@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+@@ -11,8 +12,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-02-24 02:01-0500\n"
+-"Last-Translator: samfreemanz <sfriedma@redhat.com>\n"
++"PO-Revision-Date: 2016-03-14 04:34-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: French\n"
+ "Language: fr\n"
+ "Plural-Forms: nplurals=2; plural=(n > 1)\n"
+@@ -5548,11 +5549,11 @@ msgid ""
+ msgstr ""
+ "Cet assistant vous accompagnera tout au long du processus d'enregistrement "
+ "de votre système avec Red Hat afin de recevoir des mises à jour de logiciels "
+-"ainsi que d'autres bénéfices."
++"ainsi que d'autres bénéfices. "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "Pour vous enregistrer, vous aurez besoin de :"
++msgstr " Pour vous enregistrer, vous aurez besoin de :"
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+ msgid "• A network connection"
+diff --git a/po/ja.po b/po/ja.po
+index 2daf373..3a9886a 100644
+--- a/po/ja.po
++++ b/po/ja.po
+@@ -2,6 +2,7 @@
+ # kmoriguc <kmoriguc@redhat.com>, 2014. #zanata
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # noriko <noriko@fedoraproject.org>, 2015. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ # noriko <noriko@fedoraproject.org>, 2016. #zanata
+ msgid ""
+ msgstr ""
+@@ -11,8 +12,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-02-26 03:42-0500\n"
+-"Last-Translator: noriko <noriko@fedoraproject.org>\n"
++"PO-Revision-Date: 2016-03-14 04:33-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Japanese\n"
+ "Language: ja\n"
+ "Plural-Forms: nplurals=1; plural=0\n"
+@@ -5192,7 +5193,7 @@ msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr "先に進む前に、必要に応じてプロキシの設定を行ってください。"
++msgstr "先に進む前に、必要に応じてプロキシの設定を行ってください。 "
+ 
+ # translation auto-copied from project subscription-manager, version 1.9.X, document keys, author noriko
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5218,11 +5219,11 @@ msgid ""
+ "This assistant will guide you through the process of registering your system "
+ "with Red Hat to receive software updates and other benefits. "
+ msgstr ""
+-"ソフトウェア更新やその他のサービスをお受け取りになれるようシステムを Red Hat に登録していただく手順を順を追って説明していくツールです。"
++"ソフトウェア更新やその他のサービスをお受け取りになれるようシステムを Red Hat に登録していただく手順を順を追って説明していくツールです。 "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "登録には次の項目が必要になります。"
++msgstr " 登録には次の項目が必要になります。"
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+ msgid "• A network connection"
+diff --git a/po/ko.po b/po/ko.po
+index 6db9519..d21b279 100644
+--- a/po/ko.po
++++ b/po/ko.po
+@@ -2,6 +2,7 @@
+ # Chris Rog <crog@redhat.com>, 2015. #zanata
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # eukim <eukim@fedoraproject.org>, 2015. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+ "Project-Id-Version: PACKAGE VERSION\n"
+@@ -10,7 +11,7 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2015-09-25 02:53-0400\n"
++"PO-Revision-Date: 2016-03-14 04:13-0400\n"
+ "Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Korean\n"
+ "Language: ko\n"
+@@ -5269,7 +5270,7 @@ msgstr ""
+ msgid ""
+ "Your installed products could be covered using one of multiple service "
+ "levels."
+-msgstr "설치된 제품은 여러 서비스 레벨 중 하나를 사용하여 적용할 수 있습니다. "
++msgstr "설치된 제품은 여러 서비스 레벨 중 하나를 사용하여 적용할 수 있습니다."
+ 
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:4
+ msgid ""
+@@ -5294,17 +5295,17 @@ msgstr ""
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+ msgid "• A network connection"
+-msgstr "• 네트워크 연결 "
++msgstr "• 네트워크 연결"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:5
+ msgid "• Your account login"
+-msgstr "• 사용자 계정 로그인 "
++msgstr "• 사용자 계정 로그인"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:7
+ msgid "• The address of a subscription management service (optional)"
+-msgstr "서브스크립션 관리 서비스 주소 (옵션) "
++msgstr "서브스크립션 관리 서비스 주소 (옵션)"
+ 
+ #: ../po/tmp_ui_links/done_box.ui.glade.h:1
+ msgid "Registration with Red Hat Subscription Management is Done!"
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index 06b9bd4..acb9584 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -1,6 +1,7 @@
+ # gcintra <gcintra@fedoraproject.org>, 2014. #zanata
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # gcintra <gcintra@fedoraproject.org>, 2015. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ # Maria Andrada <msuppesd@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+@@ -10,8 +11,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-03-02 04:47-0500\n"
+-"Last-Translator: Maria Andrada <msuppesd@redhat.com>\n"
++"PO-Revision-Date: 2016-03-14 05:27-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Portuguese (Brazil)\n"
+ "Language: pt-BR\n"
+ "Plural-Forms: nplurals=2; plural=(n != 1)\n"
+@@ -819,7 +820,7 @@ msgid ""
+ "command clean or unregister to remove local profile."
+ msgstr ""
+ "O perfil do cliente \"%s\" foi excluído do servidor. Você pode usar o "
+-"comando clean (limpar) ou cancelar o registro para remover o perfil local. "
++"comando clean (limpar) ou cancelar o registro para remover o perfil local."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:534
+@@ -1253,7 +1254,7 @@ msgstr ""
+ "Erro: Não é possível forçar o registro enquanto estiver tentando se "
+ "recuperar do registro com o consumerid. Por favor, use --force sem --"
+ "consumerid para fazer o registro novamente ou use o comando clean (limpar) e "
+-"tente mais uma vez sem --force. "
++"tente mais uma vez sem --force."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1054
+@@ -1420,14 +1421,14 @@ msgstr "Lançamentos Disponíveis"
+ 
+ #: ../src/subscription_manager/managercli.py:1431
+ msgid "The ID of the pool to attach (can be specified more than once)"
+-msgstr "A ID do pool para anexar (pode ser especificada mais de uma vez) "
++msgstr "A ID do pool para anexar (pode ser especificada mais de uma vez)"
+ 
+ #: ../src/subscription_manager/managercli.py:1433
+ msgid ""
+ "Number of subscriptions to attach. May not be used with an auto-attach."
+ msgstr ""
+ "Número de subscrições para anexar. Pode não ser usado com uma anexação "
+-"automática. "
++"automática."
+ 
+ #: ../src/subscription_manager/managercli.py:1435
+ msgid ""
+@@ -1550,7 +1551,7 @@ msgstr ""
+ 
+ #: ../src/subscription_manager/managercli.py:1618
+ msgid "the ID of the pool to remove (can be specified more than once)"
+-msgstr "A ID do pool para remover (pode ser especificada mais de uma vez) "
++msgstr "A ID do pool para remover (pode ser especificada mais de uma vez)"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1620
+@@ -1574,7 +1575,7 @@ msgid ""
+ "Instead, use the remove --serial option."
+ msgstr ""
+ "Erro: O servidor intitulado registrado não fornece suporte a remove --pool. \n"
+-"No lugar disto, use a opção remove --serial. "
++"No lugar disto, use a opção remove --serial."
+ 
+ #: ../src/subscription_manager/managercli.py:1645
+ msgid ""
+@@ -1586,7 +1587,7 @@ msgstr ""
+ #: ../src/subscription_manager/managercli.py:1663
+ #, python-format
+ msgid "%s successfully removed at the server:"
+-msgstr "%s removido(s) com êxito no servidor: "
++msgstr "%s removido(s) com êxito no servidor:"
+ 
+ #: ../src/subscription_manager/managercli.py:1667
+ #, python-format
+@@ -1696,7 +1697,7 @@ msgstr ""
+ 
+ #: ../src/subscription_manager/managercli.py:1874
+ msgid "View and configure with 'subscription-manager plugins'"
+-msgstr "Visualizar e configurar com 'plugins subscription-manager'"
++msgstr "Visualizar e configurar com 'subscription-manager plugins'"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys, author gcintra
+ #: ../src/subscription_manager/managercli.py:1878
+@@ -5535,7 +5536,7 @@ msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr "Caso necessário, configure seu proxy antes de seguir adiante."
++msgstr "Caso necessário, configure seu proxy antes de seguir adiante. "
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5569,7 +5570,7 @@ msgstr ""
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "Você precisará do seguinte para se registrar:"
++msgstr " Você precisará do seguinte para se registrar:"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+diff --git a/po/ru.po b/po/ru.po
+index dbdc24b..b56ca47 100644
+--- a/po/ru.po
++++ b/po/ru.po
+@@ -1,6 +1,7 @@
+ # ypoyarko <ypoyarko@redhat.com>, 2014. #zanata
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # ypoyarko <ypoyarko@redhat.com>, 2015. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ # ypoyarko <ypoyarko@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+@@ -10,8 +11,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-03-05 01:18-0500\n"
+-"Last-Translator: ypoyarko <ypoyarko@redhat.com>\n"
++"PO-Revision-Date: 2016-03-14 05:24-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Russian\n"
+ "Language: ru\n"
+ "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+@@ -337,7 +338,7 @@ msgid ""
+ "Please ensure system has subscriptions attached, and see '%s' to enable "
+ "additional repositories"
+ msgstr ""
+-"Убедитесь, что у системы есть подписки.  «%s» поможет получить информацию о "
++"Убедитесь, что система уже подписана.  «%s» поможет получить информацию о "
+ "добавлении репозиториев."
+ 
+ #: ../src/subscription_manager/migrate/migrate.py:793
+@@ -358,7 +359,7 @@ msgid ""
+ "don't execute the auto-attach option while registering with subscription "
+ "manager"
+ msgstr ""
+-"не назначать подписки автоматически при регистрации с помощью менеджера "
++"не оформлять подписки автоматически при регистрации с помощью менеджера "
+ "подписок"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+@@ -367,7 +368,7 @@ msgid ""
+ "service level to follow when attaching subscriptions, for no service level "
+ "use --servicelevel=\"\""
+ msgstr ""
+-"Уровень обслуживания для назначения подписок. Если не требуется, укажите --"
++"Уровень обслуживания для оформления подписки. Если не требуется, укажите --"
+ "servicelevel=\"\"."
+ 
+ #: ../src/subscription_manager/migrate/migrate.py:829
+@@ -416,7 +417,7 @@ msgstr "введите пароль доступа к старому серве
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/migrate/migrate.py:863
+ msgid "specify the subscription management server to migrate to"
+-msgstr "Укажите сервер управления подписками для миграции"
++msgstr "Укажите новый сервер управления подписками"
+ 
+ #: ../src/subscription_manager/migrate/migrate.py:865
+ msgid "specify the user name on the destination server"
+@@ -753,7 +754,7 @@ msgid ""
+ "subscription-manager is disabled when running inside a container. Please "
+ "refer to your host system for subscription management.\n"
+ msgstr ""
+-"В контейнере subscription-manager отключается. Используйте инструменты "
++"subscription-manager отключается в контейнерах. Используйте инструменты "
+ "управления подписками его хост-системы.\n"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+@@ -1155,7 +1156,7 @@ msgstr "Устарел (см. --auto-attach)"
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:984
+ msgid "automatically attach compatible subscriptions to this system"
+-msgstr "автоматически выбрать подписки"
++msgstr "автоматически подобрать подписки"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:986
+@@ -1168,8 +1169,8 @@ msgid ""
+ "system preference used when subscribing automatically, requires --auto-"
+ "attach"
+ msgstr ""
+-"при автоматической подписке учитывать настроенные предпочтения (требует --"
+-"auto-attach)"
++"при автоматическом оформлении подписки учитывать настроенные предпочтения "
++"(требует --auto-attach)"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:995
+@@ -1185,7 +1186,9 @@ msgstr "Ошибка. Имя системы не может быть пусты
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:999
+ msgid "Error: Activation keys do not require user credentials."
+-msgstr "Ошибка. Ключи активации не требуют указания реквизитов пользователя."
++msgstr ""
++"Ошибка. Ключи активации не требуют указания регистрационных данных "
++"пользователя."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1001
+@@ -1431,7 +1434,7 @@ msgstr "В обновлении подписок нет необходимост
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1454
+ msgid "Attach a specified subscription to the registered system"
+-msgstr "Назначить подписку зарегистрированной системе"
++msgstr "Оформить подписку для зарегистрированной системы"
+ 
+ #: ../src/subscription_manager/managercli.py:1465
+ msgid "Error: --auto may not be used when specifying pools."
+@@ -1478,7 +1481,7 @@ msgstr "Укажите числовой ID."
+ #: ../src/subscription_manager/managercli.py:1528
+ #, python-format
+ msgid "Successfully attached a subscription for: %s"
+-msgstr "Подписка назначена: %s"
++msgstr "Подписка оформлена: %s"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/managercli.py:1551
+@@ -3021,7 +3024,7 @@ msgstr "Отмена регистрации"
+ #: ../src/subscription_manager/gui/registergui.py:1100
+ #: ../src/subscription_manager/gui/registergui.py:1691
+ msgid "Attaching subscriptions"
+-msgstr "Присвоение подписок"
++msgstr "Оформление подписки"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/registergui.py:1104
+@@ -3055,7 +3058,7 @@ msgstr "Далее"
+ #: ../src/subscription_manager/gui/registergui.py:1253
+ msgid "Unable to auto-attach, server does not support service levels."
+ msgstr ""
+-"Ошибка автоматического назначения: сервер не поддерживает уровни "
++"Ошибка автоматического оформления подписки: сервер не поддерживает уровни "
+ "обслуживания."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+@@ -3063,7 +3066,7 @@ msgstr ""
+ msgid ""
+ "No installed products on system. No need to attach subscriptions at this "
+ "time."
+-msgstr "Нет установленных продуктов. В добавлении подписок нет необходимости."
++msgstr "Нет установленных продуктов. В оформлении подписки нет необходимости."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/registergui.py:1268
+@@ -3387,12 +3390,12 @@ msgstr "Нет предыдущих обновлений"
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/reposgui.py:54
+ msgid "Attached subscriptions do not provide any repositories."
+-msgstr "Назначенные подписки не предоставляют репозитории."
++msgstr "Оформленные подписки не предоставляют доступа к репозиториям."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/reposgui.py:55
+ msgid "No repositories are available without an attached subscription."
+-msgstr "Для доступа к репозиториям необходимо выбрать подписки."
++msgstr "Для доступа к репозиториям необходимо оформить подписку."
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/reposgui.py:127 ../src/rct/printing.py:108
+@@ -4859,7 +4862,7 @@ msgstr "метка"
+ #: ../src/subscription_manager/gui/data/glade/installed.glade.h:3
+ #: ../po/tmp_ui_links/installed.ui.glade.h:3
+ msgid "Overall Status"
+-msgstr "Общий статус:"
++msgstr "Общий статус"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/installed.glade.h:5
+@@ -4871,7 +4874,7 @@ msgstr "Регистрация"
+ #: ../src/subscription_manager/gui/data/glade/installed.glade.h:6
+ #: ../po/tmp_ui_links/installed.ui.glade.h:6
+ msgid "Auto-attach"
+-msgstr "Назначить автоматически"
++msgstr "Подписать автоматически"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../src/subscription_manager/gui/data/glade/installed.glade.h:7
+@@ -5410,7 +5413,7 @@ msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr "Если необходимо, настройте прокси-сервер."
++msgstr "Если необходимо, настройте прокси-сервер. "
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5419,7 +5422,7 @@ msgid ""
+ "levels."
+ msgstr ""
+ "Возможно, установленные продукты могли бы контролироваться уровнями "
+-"обслуживания. "
++"обслуживания."
+ 
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:4
+ msgid ""
+@@ -5439,11 +5442,11 @@ msgid ""
+ "with Red Hat to receive software updates and other benefits. "
+ msgstr ""
+ "Помощник последовательно проведет вас через процесс регистрации системы в "
+-"Red Hat."
++"Red Hat. "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "Для регистрации вам потребуются:"
++msgstr " Для регистрации вам потребуются:"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+diff --git a/po/zh_CN.po b/po/zh_CN.po
+index c95f727..a57ff62 100644
+--- a/po/zh_CN.po
++++ b/po/zh_CN.po
+@@ -1,6 +1,7 @@
+ # leahliu <lliu@redhat.com>, 2014. #zanata
+ # John Sefler <jsefler@redhat.com>, 2015. #zanata
+ # leahliu <lliu@redhat.com>, 2015. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ # leahliu <lliu@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+@@ -10,8 +11,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-02-24 11:19-0500\n"
+-"Last-Translator: leahliu <lliu@redhat.com>\n"
++"PO-Revision-Date: 2016-03-14 04:32-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Chinese (Simplified, China)\n"
+ "Language: zh-Hans-CN\n"
+ "Plural-Forms: nplurals=1; plural=0\n"
+@@ -5239,7 +5240,7 @@ msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr "如果需要，请在进入下一步前配置代理服务器。"
++msgstr "如果需要，请在进入下一步前配置代理服务器。 "
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5264,11 +5265,11 @@ msgstr "apply_button"
+ msgid ""
+ "This assistant will guide you through the process of registering your system "
+ "with Red Hat to receive software updates and other benefits. "
+-msgstr "这个助手程序将为您演示在 Red Hat 注册系统以便接收软件更新和其他优惠的步骤。"
++msgstr "这个助手程序将为您演示在 Red Hat 注册系统以便接收软件更新和其他优惠的步骤。 "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "您需要满足以下条件方可注册："
++msgstr " 您需要满足以下条件方可注册："
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+diff --git a/po/zh_TW.po b/po/zh_TW.po
+index 7afee07..c227734 100644
+--- a/po/zh_TW.po
++++ b/po/zh_TW.po
+@@ -4,6 +4,7 @@
+ # noriko <noriko@fedoraproject.org>, 2015. #zanata
+ # tchuang <tchuang@redhat.com>, 2015. #zanata
+ # Chester Cheng <ccheng@redhat.com>, 2016. #zanata
++# John Sefler <jsefler@redhat.com>, 2016. #zanata
+ msgid ""
+ msgstr ""
+ "Project-Id-Version: PACKAGE VERSION\n"
+@@ -12,8 +13,8 @@ msgstr ""
+ "MIME-Version: 1.0\n"
+ "Content-Type: text/plain; charset=UTF-8\n"
+ "Content-Transfer-Encoding: 8bit\n"
+-"PO-Revision-Date: 2016-02-25 11:02-0500\n"
+-"Last-Translator: Chester Cheng <ccheng@redhat.com>\n"
++"PO-Revision-Date: 2016-03-14 05:28-0400\n"
++"Last-Translator: John Sefler <jsefler@redhat.com>\n"
+ "Language-Team: Chinese (Traditional, Taiwan)\n"
+ "Language: zh-Hant-TW\n"
+ "Plural-Forms: nplurals=1; plural=0\n"
+@@ -1579,7 +1580,7 @@ msgstr "匯入憑證時發生了一項錯誤。請檢查日誌檔案以取得更
+ 
+ #: ../src/subscription_manager/managercli.py:1874
+ msgid "View and configure with 'subscription-manager plugins'"
+-msgstr "使用「subscription-manager 外掛程式」檢視並配置"
++msgstr "使用「subscription-manager plugins」檢視並配置"
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys, author tchuang
+ #: ../src/subscription_manager/managercli.py:1878
+@@ -5239,7 +5240,7 @@ msgstr "system_name_grid"
+ 
+ #: ../po/tmp_ui_links/choose_server.ui.glade.h:13
+ msgid "If required, please configure your proxy before moving forward. "
+-msgstr "若有必要，請在繼續進行前配置您的代理伺服器。"
++msgstr "若有必要，請在繼續進行前配置您的代理伺服器。 "
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/selectsla.ui.glade.h:2
+@@ -5264,11 +5265,11 @@ msgstr "apply_button"
+ msgid ""
+ "This assistant will guide you through the process of registering your system "
+ "with Red Hat to receive software updates and other benefits. "
+-msgstr "這助理將引導您完成向 Red Hat 註冊系統，以收到軟體更新與其它好處的過程。"
++msgstr "這助理將引導您完成向 Red Hat 註冊系統，以收到軟體更新與其它好處的過程。 "
+ 
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:3
+ msgid " You will need the following to register:"
+-msgstr "您需要以下事物以進行註冊："
++msgstr " 您需要以下事物以進行註冊："
+ 
+ # translation auto-copied from project subscription-manager, version 1.11.X, document keys
+ #: ../po/tmp_ui_links/registration_info.ui.glade.h:4
+diff --git a/src/subscription_manager/gui/registergui.py b/src/subscription_manager/gui/registergui.py
+index 3a66d5c..8a5de3f 100644
+--- a/src/subscription_manager/gui/registergui.py
++++ b/src/subscription_manager/gui/registergui.py
+@@ -1397,7 +1397,7 @@ class EnvironmentScreen(Screen):
+ 
+         envs = [(env['id'], env['name']) for env in environments]
+         if len(envs) == 1:
+-            self.set_environement(envs[0][0])
++            self.set_environment(envs[0][0])
+             self.emit('move-to-screen', PERFORM_REGISTER_PAGE)
+             self.pre_done()
+             return
+diff --git a/src/subscription_manager/managercli.py b/src/subscription_manager/managercli.py
+index 4fb022a..529694c 100644
+--- a/src/subscription_manager/managercli.py
++++ b/src/subscription_manager/managercli.py
+@@ -1081,10 +1081,10 @@ class RegisterCommand(UserPassCommand):
+                         self.options.consumerid)
+                 consumer = admin_cp.getConsumer(self.options.consumerid,
+                         self.username, self.password)
+-                try:
+-                    consumer_type = consumer['type']
+-                except KeyError:
++
++                if 'type' not in consumer:
+                     log.warn('Unable to determine consumer type, proceeding with registration.')
++
+                 if consumer.get('type', {}).get('manifest', {}):
+                     log.error("registration attempted with consumerid = Subscription Management Application's uuid: %s" % self.options.consumerid)
+                     system_exit(os.EX_USAGE, _("Error: Cannot register with an ID of a Subscription Management Application: %s" % self.options.consumerid))
+diff --git a/subscription-manager.spec b/subscription-manager.spec
+index f7bf028..a90d05f 100644
+--- a/subscription-manager.spec
++++ b/subscription-manager.spec
+@@ -62,7 +62,7 @@
+ 
+ Name: subscription-manager
+ Version: 1.16.8
+-Release: 4%{?dist}
++Release: 5%{?dist}
+ Summary: Tools and libraries for subscription and repository management
+ Group:   System Environment/Base
+ License: GPLv2
+@@ -577,6 +577,10 @@ fi
+ %endif
+ 
+ %changelog
++* Tue Mar 15 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-5
++- 1303768: Adds translations from zanata. (csnyder@redhat.com)
++- 1313631: Registration with one environment proceeds as normal
++  (csnyder@redhat.com)
+ * Sat Mar 05 2016 Christopher Snyder <csnyder@redhat.com> 1.16.8-4
+ - 1303768: Adds additional updated translations from zanata.
+   (csnyder@redhat.com)

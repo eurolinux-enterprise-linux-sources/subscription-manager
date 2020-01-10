@@ -16,13 +16,14 @@
 from setuptools import setup
 
 setup(name="subscription-manager",
-      version='1.14.10',
+      version='1.16.8',
       url="http://candlepinproject.org",
       description="Manage subscriptions for Red Hat products.",
       license="GPLv2",
       author="Adrian Likins",
       author_email="alikins@redhat.com",
       packages=['src/subscription_manager',
+                'src/subscription_manager/api',
                 'src/subscription_manager/gui',
                 'src/subscription_manager/plugin',
                 'src/subscription_manager/plugin/ostree',

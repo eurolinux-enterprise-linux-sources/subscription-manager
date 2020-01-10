@@ -13,27 +13,28 @@
 # in this software or its documentation.
 #
 
-import gtk
-import gtk.glade
+#from gi.repository import Gdk
 
+from subscription_manager.ga import Gdk as ga_Gdk
 from subscription_manager.gui import widgets
 
 
-class Progress(widgets.GladeWidget):
+class Progress(widgets.SubmanBaseWidget):
 
     widget_names = ['progressWindow', 'progressLabel', 'progressBar', 'statusLabel']
+    gui_file = "progress"
 
-    def __init__(self, title, label):
-        super(Progress, self).__init__('progress.glade')
+    def __init__(self, title, label, support_markup=False):
+        super(Progress, self).__init__()
 
         self.progressWindow.connect("delete-event", self._on_delete_event)
-        cursor = gtk.gdk.Cursor(gtk.gdk.WATCH)
-        self.progressWindow.window.set_cursor(cursor)
+        cursor = ga_Gdk.Cursor(ga_Gdk.CursorType.WATCH)
+        self.progressWindow.get_window().set_cursor(cursor)
 
         self.lastProgress = 0.0
 
         self.set_title(title)
-        self.set_label(label)
+        self.set_label(label, support_markup)
 
     def hide(self):
         self.progressWindow.hide()
@@ -42,8 +43,11 @@ class Progress(widgets.GladeWidget):
     def set_title(self, text):
         self.progressWindow.set_title(text)
 
-    def set_label(self, text):
-        self.progressLabel.set_text(text)
+    def set_label(self, text, markup=False):
+        if markup:
+            self.progressLabel.set_markup(text)
+        else:
+            self.progressLabel.set_text(text)
 
     def pulse(self):
         """
@@ -71,7 +75,7 @@ class Progress(widgets.GladeWidget):
     def set_status_label(self, text):
         self.statusLabel.set_text(text)
 
-    def set_parent_window(self, window):
+    def set_transient_for(self, window):
         self.progressWindow.set_transient_for(window)
 
     def _on_delete_event(self, widget, event):

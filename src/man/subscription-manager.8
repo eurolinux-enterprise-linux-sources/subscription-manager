@@ -1,4 +1,4 @@
-.TH subscription-manager 8
+.TH subscription-manager 8 - - "Subscription Management"
 .SH NAME
 subscription-manager \- Registers systems to a subscription management service and then attaches and manages subscriptions for software products.
 
@@ -77,7 +77,7 @@ has specific options available for each command, depending on what operation is 
 6. release
 
 .IP
-7. servicelevel
+7. service-level
 
 .IP
 8. import
@@ -165,7 +165,7 @@ Gives the user account password.
 .TP
 .B --serverurl=SERVER_HOSTNAME
 Passes the name of the subscription service with which to register the system. The default value, if this is not given, is the Customer Portal Subscription Management service,
-.B subscription.rhn.redhat.com.
+.B subscription.rhsm.redhat.com.
 If there is an on-premise subscription service such as Subscription Asset Manager, this parameter can be used to submit the hostname of the subscription service. For Subscription Asset Manager, if the Subscription Manager tool is configured with the Subscription Asset Manager RPM, then the default value for the
 .B --serverurl
 parameter is for the on-premise Subscription Asset Manager server.
@@ -226,7 +226,7 @@ the existing system entry is unregistered first, all of its subscriptions are re
 .B --org=ORG
 Assigns the system to an organization. Infrastructures which are managed on-site may be
 .I multi-tenant,
-meaning that there are multiple organizations within one customer unit. A system may be assigned manually to one of these suborganizations. When a system is registered with the Customer Portal, this is not required. When a system is registered with an on-premise application such as Subscription Asset Manager, this argument \fIis\fP required, even if there is only a single organization configured.
+meaning that there are multiple organizations within one customer unit. A system may be assigned manually to one of these organizations. When a system is registered with the Customer Portal, this is not required. When a system is registered with an on-premise application such as Subscription Asset Manager, this argument \fIis\fP required, unless there is only a single organization configured.
 
 .TP
 .B --environment=ENV
@@ -240,9 +240,9 @@ Shortcut for "release --set=VERSION"
 .B --type=CONSUMERTYPE
 Sets the type of unit to register. Most units in the inventory will use the default value of
 .B system.
-For development or test systems, this can be
+For development or test units, this can be
 .B person
-, which indicates a personal (rather than organizational) subscription. Other systems can be
+, which indicates a personal (rather than organizational) unit. Another type of unit can be
 .B candlepin
 for a local content service or
 .B domain
@@ -284,7 +284,7 @@ Specifies a file from which to read whitespace-delimited pool IDs. If FILE is "-
 .B --quantity=NUMBER
 Attaches a specified number of subscriptions to the system. Subscriptions may have certain limits on them, like the number of sockets on the system or the number of allowed virtual guests. It is possible to attach multiple subscriptions (or
 .I stacking
-subscriptions) to cover the number of sockets, guests, or other characteristics.
+subscriptions) to cover the number of sockets, guests, or other characteristics. May not be used with an auto-attach.
 
 
 .TP
@@ -305,7 +305,7 @@ Enables the auto-attach option for the system. If there is any change in the sub
 
 .TP
 .B --disable
-Disables the auto-attach option for the system. If auto-attach is disabled, then any changes in installed products or subscriptions for the system (including expirations) must be addressed manually by the administrator.
+Disables the auto-attach option for the system. If auto-attach is disabled, then any changes in installed products or subscriptions for the system (including expired subscriptions) must be addressed manually by the administrator.
 
 .TP
 .B --show
@@ -322,6 +322,13 @@ Gives the serial number of the subscription certificate for the specific product
 .B /etc/pki/entitlement/<serial_number>.pem.
 To remove multiple subscriptions, use the
 .B --serial
+option multiple times.
+
+.TP
+.B --pool=POOLID
+Removes all subscription certificates for the specified pool id from the system.
+To remove multiple sets of subscriptions, use the
+.B --pool
 option multiple times.
 
 .TP
@@ -349,25 +356,32 @@ Sets the minor (Y-stream) release version to use, such as 6.3.
 Removes any previously set release version preference.
 
 
-.SS servicelevel OPTIONS
+.SS SERVICE-LEVEL OPTIONS
 The
-.B servicelevel
+.B service-level
 command displays the current configured service level
 .I preference
 for products installed on the system. For example, if the service-level preference is standard, then a subscription with a standard service level is selected when auto-attaching subscriptions to the system.
 
-.IP
-The
-.B servicelevel
-command does not set the service level for the system; it only shows its current setting or available settings. The service-level preference must be set in the Subscription Manager GUI.
+.TP
+.B --serverurl=SERVER_URL
+Server URL in the form of https://hostname:port/prefix
+
+.TP
+.B --insecure
+Do not check the server SSL certificate against available certificate authorities
+
+.TP
+.B --show
+Shows the system's current service-level preference. If a service level is not set, then there is a message saying it is not set.
 
 .TP
 .B --list
 Lists the available service levels.
 
 .TP
-.B --show
-Shows the system's current service-level preference. If a service level is not set, then there is a message saying it is not set.
+.B --set=SERVICE_LEVEL
+Service level to apply to this system
 
 .TP
 .B --unset
@@ -501,11 +515,11 @@ Lists all of the disabled repositories that are provided by the content service 
 
 .TP
 .B --enable=REPO_ID
-Enables the specified repository, which is made available by the content sources identified in the system subscriptions. To enable multiple repositories, use this argument multiple times.
+Enables the specified repository, which is made available by the content sources identified in the system subscriptions. To enable multiple repositories, use this argument multiple times. Wild cards * and ? are supported.
 
 .TP
 .B --disable=REPO_ID
-Disables the specified repository, which is made available by the content sources identified in the system subscriptions. To disable multiple repositories, use this argument multiple times.
+Disables the specified repository, which is made available by the content sources identified in the system subscriptions. To disable multiple repositories, use this argument multiple times. Wild cards * and ? are supported.
 
 
 .SS ORGS OPTIONS
@@ -524,7 +538,7 @@ Gives the user account password.
 .TP
 .B --serverurl=SERVER_HOSTNAME
 Passes the name of the subscription service to use to list all available organizations. The \fBorgs\fP command will list all organizations for the specified service for which the user account is granted access. The default value, if this is not given, is the Customer Portal Subscription Management service,
-.B https://subscription.rhn.redhat.com:443.
+.B https://subscription.rhsm.redhat.com:443.
 If there is an on-premise subscription service such as Subscription Asset Manager, this parameter can be used to submit the hostname of the subscription service, in the form \fI[protocol://]servername[:port][/prefix]\fP. For Subscription Asset Manager, if the Subscription Manager tool is configured with the Subscription Asset Manager RPM, then the default value for the
 .B --serverurl
 parameter is for the on-premise Subscription Asset Manager server.
@@ -661,7 +675,7 @@ command removes all of the subscription and identity data from the local system
 .I without affecting the system information in the subscription management service.
 This means that any of the subscriptions applied to the system are not available for other systems to use. The
 .B clean
-command is useful in cases where the local subscription information is corrupted or lost somehow, and the system will be reregistered using the
+command is useful in cases where the local subscription information is corrupted or lost somehow, and the system will be re-registered using the
 .B register --consumerid=EXISTING_ID
 command.
 
@@ -802,7 +816,7 @@ to a subscription management service -- which makes all of the subscriptions ava
 The default subscription management service in the Subscription Manager configuration is the Customer Portal Subscription Management service. The configuration file can be edited before the system is registered to point to an on-premise subscription management service like Subscription Asset Manager.
 
 .PP
-Systems are usually registered to a subscription management service as part of their initial configuration, such as the firstboot or kickstart process. However, systems can be registered manually after they are configured, can be removed from a content service, or reregistered.
+Systems are usually registered to a subscription management service as part of their initial configuration, such as the firstboot or kickstart process. However, systems can be registered manually after they are configured, can be removed from a content service, or re-registered.
 
 .PP
 If a system has never been registered (not even during firstboot), then the
@@ -856,7 +870,7 @@ subscription-manager register --username=admin
 .RE
 
 .PP
-If a system is registered and then somehow its subscription information is lost -- a drive crashes or the certificates are deleted or corrupted -- the system can be reregistered, with all of its subscriptions restored, by registering with the existing ID.
+If a system is registered and then somehow its subscription information is lost -- a drive crashes or the certificates are deleted or corrupted -- the system can be re-registered, with all of its subscriptions restored, by registering with the existing ID.
 
 .RS
 .nf
@@ -991,7 +1005,7 @@ option.
 
 .RS
 .nf
-subscription-manager list --instaled --matches="*Server*"
+subscription-manager list --installed --matches="*Server*"
 
 +-------------------------------------------+
     Installed Product Status
@@ -1022,7 +1036,7 @@ subscription-manager attach
 .pp
 As with the
 .B register
-command, the system can be auto-attached to the best-fitting subscriptions. This is the default action and is equilivent to  using the
+command, the system can be auto-attached to the best-fitting subscriptions. This is the default action and is equivalent to  using the
 .B --auto
 option:
 
@@ -1184,7 +1198,7 @@ tool can be run as a post-install script as part of the kickstart installation p
 The
 .B subscription-manager
 tool uses outgoing HTTPS requests. In the default configuration it will use HTTPS on port 443 to the subscription servers
-.B subscription.rhn.redhat.com
+.B subscription.rhsm.redhat.com
 and to the content delivery service
 .B cdn.redhat.com.
 

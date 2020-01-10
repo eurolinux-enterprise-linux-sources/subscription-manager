@@ -16,9 +16,7 @@
 import gettext
 import logging
 
-import gtk
-import gtk.glade
-
+from subscription_manager.ga import Gtk as ga_Gtk
 from subscription_manager.gui import widgets
 from subscription_manager.gui import utils
 from subscription_manager import injection as inj
@@ -29,7 +27,7 @@ _ = gettext.gettext
 log = logging.getLogger('rhsm-app.' + __name__)
 
 
-class PreferencesDialog(widgets.GladeWidget):
+class PreferencesDialog(widgets.SubmanBaseWidget):
     """
     Dialog for setting system preferences.
 
@@ -39,11 +37,12 @@ class PreferencesDialog(widgets.GladeWidget):
     """
 
     widget_names = ['dialog', 'release_combobox', 'sla_combobox',
-            'autoheal_checkbox', 'autoheal_event', 'autoheal_label',
-            'close_button']
+                    'autoheal_checkbox', 'autoheal_event', 'autoheal_label',
+                    'close_button']
+    gui_file = "preferences"
 
     def __init__(self, backend, parent):
-        super(PreferencesDialog, self).__init__('preferences.glade')
+        super(PreferencesDialog, self).__init__()
         self.backend = backend
         self.allow_callbacks = False
         self.identity = inj.require(inj.IDENTITY)
@@ -58,11 +57,18 @@ class PreferencesDialog(widgets.GladeWidget):
 
         # The first string is the displayed service level; the second is
         # the value sent to Candlepin.
-        self.release_model = gtk.ListStore(str, str)
-        self.sla_model = gtk.ListStore(str, str)
+        self.release_model = ga_Gtk.ListStore(str, str)
+        self.sla_model = ga_Gtk.ListStore(str, str)
 
         self.release_combobox.set_model(self.release_model)
         self.sla_combobox.set_model(self.sla_model)
+
+        cell_renderer = ga_Gtk.CellRendererText()
+        self.release_combobox.pack_start(cell_renderer, True)
+        self.release_combobox.add_attribute(cell_renderer, "text", 0)
+
+        self.sla_combobox.pack_start(cell_renderer, True)
+        self.sla_combobox.add_attribute(cell_renderer, "text", 0)
 
         self.close_button.connect("clicked", self._close_button_clicked)
         self.sla_combobox.connect("changed", self._sla_changed)

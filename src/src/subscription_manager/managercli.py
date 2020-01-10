@@ -49,15 +49,16 @@ from subscription_manager.jsonwrapper import PoolWrapper
 from subscription_manager import managerlib
 from subscription_manager.managerlib import valid_quantity, format_date
 from subscription_manager.release import ReleaseBackend
-from subscription_manager.repolib import RepoActionInvoker, RepoFile
+from subscription_manager.repolib import RepoActionInvoker, RepoFile, manage_repos_enabled
 from subscription_manager.utils import parse_server_info, \
         parse_baseurl_info, format_baseurl, is_valid_server_info, \
         MissingCaCertException, get_client_versions, get_server_versions, \
-        restart_virt_who, get_terminal_width, \
+        restart_virt_who, get_terminal_width, print_error, unique_list_items, \
         ProductCertificateFilter, EntitlementCertificateFilter
 from subscription_manager.overrides import Overrides, Override
 from subscription_manager.exceptions import ExceptionMapper
-from subscription_manager.printing_utils import columnize, format_name, _none_wrap, _echo
+from subscription_manager.printing_utils import columnize, format_name, \
+        none_wrap_columnize_callback, echo_columnize_callback, highlight_by_filter_string_columnize_callback
 
 _ = gettext.gettext
 
@@ -65,6 +66,7 @@ log = logging.getLogger('rhsm-app.' + __name__)
 
 cfg = rhsm.config.initConfig()
 
+SM = "subscription-manager"
 ERR_NOT_REGISTERED_MSG = _("This system is not yet registered. Try 'subscription-manager register --help' for more information.")
 ERR_NOT_REGISTERED_CODE = 1
 
@@ -103,6 +105,14 @@ AVAILABLE_SUBS_LIST = [
     _("Subscription Type:"),
     _("Ends:"),
     _("System Type:")
+]
+
+AVAILABLE_SUBS_MATCH_COLUMNS = [
+    _("Subscription Name:"),
+    _("Provides:"),
+    _("SKU:"),
+    _("Contract:"),
+    _("Service Level:")
 ]
 
 REPOS_LIST = [
@@ -157,6 +167,10 @@ def handle_exception(msg, ex):
     if isinstance(ex, SystemExit):
         raise ex
 
+    # GoneException will be handled uniformly for every command except unregister.
+    if isinstance(ex, connection.GoneException):
+        raise ex
+
     log.error(msg)
     log.exception(ex)
 
@@ -208,7 +222,7 @@ def show_autosubscribe_output(uep):
         status = STATUS_MAP[prod_status[4]]
         if prod_status[4] == NOT_SUBSCRIBED:
             all_subscribed = False
-        print columnize(PRODUCT_STATUS, _echo, prod_status[0], status) + "\n"
+        print columnize(PRODUCT_STATUS, echo_columnize_callback, prod_status[0], status) + "\n"
     if not all_subscribed:
         print _("Unable to find available subscriptions for all your installed products.")
     return subscribed
@@ -305,7 +319,7 @@ class CliCommand(AbstractCLICommand):
         self.parser.add_option("--serverurl", dest="server_url",
                                default=None, help=_("server URL in the form of https://hostname:port/prefix"))
         self.parser.add_option("--insecure", action="store_true",
-                                default=False, help=_("do not check the server SSL certificate against available certificate authorities"))
+                                default=False, help=_("do not check the entitlement server SSL certificate against available certificate authorities"))
 
     def _add_proxy_options(self):
         """ Add proxy options that apply to sub-commands that require network connections. """
@@ -345,6 +359,7 @@ class CliCommand(AbstractCLICommand):
 
     def _default_server_version(self):
         return {"candlepin": _("Unknown"),
+                "rules-type": _("Unknown"),
                 "server-type": _("Unknown")}
 
     def log_client_version(self):
@@ -477,7 +492,6 @@ class CliCommand(AbstractCLICommand):
             # no auth cp for get / (resources) and
             # get /status (status and versions)
             self.no_auth_cp = self.cp_provider.get_no_auth_cp()
-            self.log_server_version()
 
             self.entcertlib = EntCertActionInvoker()
 
@@ -496,7 +510,13 @@ class CliCommand(AbstractCLICommand):
                 return return_code
         except X509.X509Error, e:
             log.error(e)
-            print _('System certificates corrupted. Please reregister.')
+            system_exit(os.EX_SOFTWARE, _('System certificates corrupted. Please reregister.'))
+        except connection.GoneException, ge:
+            if ge.deleted_id == self.identity.uuid:
+                log.critical("Consumer profile \"%s\" has been deleted from the server.", self.identity.uuid)
+                system_exit(os.EX_UNAVAILABLE, _("Consumer profile \"%s\" has been deleted from the server. You can use command clean or unregister to remove local profile.") % self.identity.uuid)
+            else:
+                raise ge
 
 
 class UserPassCommand(CliCommand):
@@ -711,7 +731,7 @@ class OwnersCommand(UserPassCommand):
                 print("+-------------------------------------------+")
                 print("")
                 for owner in owners:
-                    print columnize(ORG_LIST, _echo,
+                    print columnize(ORG_LIST, echo_columnize_callback,
                             owner['displayName'], owner['key']) + "\n"
             else:
                 print(_("%s cannot register with any organizations.") % self.username)
@@ -750,7 +770,7 @@ class EnvironmentsCommand(OrgCommand):
                     print("          %s" % (_("Environments")))
                     print("+-------------------------------------------+")
                     for env in environments:
-                        print columnize(ENVIRONMENT_LIST, _echo, env['name'],
+                        print columnize(ENVIRONMENT_LIST, echo_columnize_callback, env['name'],
                                 env['description'] or "") + "\n"
                 else:
                     print _("This org does not have any environments.")
@@ -990,6 +1010,8 @@ class RegisterCommand(UserPassCommand):
             system_exit(os.EX_USAGE, _("Error: Must use --auto-attach with --servicelevel."))
         elif (self.options.activation_keys and not self.options.org):
             system_exit(os.EX_USAGE, _("Error: Must provide --org with activation keys."))
+        elif (self.options.force and self.options.consumerid):
+            system_exit(os.EX_USAGE, _("Error: Can not force registration while attempting to recover registration with consumerid. Please use --force without --consumerid to re-register or use the clean command and try again without --force."))
 
     def persist_server_options(self):
         """
@@ -1034,11 +1056,15 @@ class RegisterCommand(UserPassCommand):
                 log.error("Unable to unregister consumer: %s" % old_uuid)
                 log.exception(e)
 
+        self.cp_provider.clean()
+
         facts = inj.require(inj.FACTS)
 
         # Proceed with new registration:
         try:
             if not self.options.activation_keys:
+                print _("Registering to: %s:%s%s") % \
+                    (cfg.get("server", "hostname"), cfg.get("server", "port"), cfg.get("server", "prefix"))
                 self.cp_provider.set_user_pass(self.username, self.password)
                 admin_cp = self.cp_provider.get_basic_auth_cp()
             else:
@@ -1055,6 +1081,10 @@ class RegisterCommand(UserPassCommand):
                         self.options.consumerid)
                 consumer = admin_cp.getConsumer(self.options.consumerid,
                         self.username, self.password)
+                if consumer['type']['manifest']:
+                    log.error("registration attempted with consumerid = Subscription Management Application's uuid: %s" % self.options.consumerid)
+                    system_exit(os.EX_USAGE, _("Error: Cannot register with an ID of a Subscription Management Application: %s" % self.options.consumerid))
+
             else:
                 owner_key = self._determine_owner_key(admin_cp)
 
@@ -1116,8 +1146,10 @@ class RegisterCommand(UserPassCommand):
             if 'serviceLevel' not in consumer and self.options.service_level:
                 system_exit(os.EX_UNAVAILABLE, _("Error: The --servicelevel option is not supported "
                                  "by the server. Did not complete your request."))
-            autosubscribe(self.cp, consumer['uuid'],
-                    service_level=self.options.service_level)
+            try:
+                autosubscribe(self.cp, consumer['uuid'], service_level=self.options.service_level)
+            except connection.RestlibException, re:
+                print_error(re.msg)
 
         if (self.options.consumerid or self.options.activation_keys or self.autoattach):
             log.info("System registered, updating entitlements if needed")
@@ -1290,7 +1322,10 @@ class RedeemCommand(CliCommand):
             profile_mgr = inj.require(inj.PROFILE_MANAGER)
             profile_mgr.update_check(self.cp, self.identity.uuid)
 
-            self.cp.activateMachine(self.identity.uuid, self.options.email, self.options.locale)
+            # BZ 1248833 Ensure we print out the display message if we get any back
+            response = self.cp.activateMachine(self.identity.uuid, self.options.email, self.options.locale)
+            if response and response.get('displayMessage'):
+                system_exit(0, response.get('displayMessage'))
 
         except connection.RestlibException, e:
             #candlepin throws an exception during activateMachine, even for
@@ -1393,13 +1428,13 @@ class AttachCommand(CliCommand):
         self.substoken = None
         self.auto_attach = True
         self.parser.add_option("--pool", dest="pool", action='append',
-                               help=_("the ID of the pool to attach (can be specified more than once)"))
+                               help=_("The ID of the pool to attach (can be specified more than once)"))
         self.parser.add_option("--quantity", dest="quantity",
-            help=_("number of subscriptions to attach"))
+            help=_("Number of subscriptions to attach. May not be used with an auto-attach."))
         self.parser.add_option("--auto", action='store_true',
             help=_("Automatically attach compatible subscriptions to this system. This is the default action."))
         self.parser.add_option("--servicelevel", dest="service_level",
-                               help=_("service level to apply to this system"))
+                               help=_("Automatically attach only subscriptions matching the specified service level; only used with --auto"))
         self.parser.add_option("--file", dest="file",
                                 help=_("A file from which to read pool IDs. If a hyphen is provided, pool IDs will be read from stdin."))
 
@@ -1425,7 +1460,7 @@ class AttachCommand(CliCommand):
         return True
 
     def _validate_options(self):
-        if self.options.pool:
+        if self.options.pool or self.options.file:
             if self.options.auto:
                 system_exit(os.EX_USAGE, _("Error: --auto may not be used when specifying pools."))
             if self.options.service_level:
@@ -1437,6 +1472,8 @@ class AttachCommand(CliCommand):
         if self.options.quantity:
             if not valid_quantity(quantity):
                 system_exit(os.EX_USAGE, _("Error: Quantity must be a positive integer."))
+            elif self.options.auto or not (self.options.pool or self.options.file):
+                system_exit(os.EX_USAGE, _("Error: --quantity may not be used with an auto-attach"))
             else:
                 self.options.quantity = int(self.options.quantity)
 
@@ -1577,6 +1614,8 @@ class RemoveCommand(CliCommand):
 
         self.parser.add_option("--serial", action='append', dest="serials", metavar="SERIAL",
                        help=_("certificate serial number to remove (can be specified more than once)"))
+        self.parser.add_option("--pool", action='append', dest="pool_ids", metavar="POOL_ID",
+                       help=_("the ID of the pool to remove (can be specified more than once)"))
         self.parser.add_option("--all", dest="all", action="store_true",
                                help=_("remove all subscriptions from this system"))
 
@@ -1598,9 +1637,36 @@ class RemoveCommand(CliCommand):
                     bad = True
             if bad:
                 system_exit(os.EX_USAGE)
-        elif not self.options.all:
-            print _("Error: This command requires that you specify one of --serial or --all.")
-            system_exit(os.EX_USAGE)
+        elif self.options.pool_ids:
+            if not self.cp.has_capability("remove_by_pool_id"):
+                system_exit(os.EX_UNAVAILABLE, _("Error: The registered entitlement server does not support remove --pool."
+                        "\nInstead, use the remove --serial option."))
+        elif not self.options.all and not self.options.pool_ids:
+            system_exit(os.EX_USAGE, _("Error: This command requires that you specify one of --serial, --pool or --all."))
+
+    def _unbind_ids(self, unbind_method, consumer_uuid, ids):
+        success = []
+        failure = []
+        for id_ in ids:
+            try:
+                unbind_method(consumer_uuid, id_)
+                success.append(id_)
+            except connection.RestlibException, re:
+                if re.code == 410:
+                    system_exit(os.EX_SOFTWARE, re.msg)
+                failure.append(id_)
+                log.error(re)
+        return (success, failure)
+
+    def _print_unbind_ids_result(self, success, failure, id_name):
+        if success:
+            print _("%s successfully removed at the server:" % id_name)
+            for id_ in success:
+                print "   %s" % id_
+        if failure:
+            print _("%s unsuccessfully removed at the server:" % id_name)
+            for id_ in failure:
+                print "   %s" % id_
 
     def _do_command(self):
         """
@@ -1623,27 +1689,27 @@ class RemoveCommand(CliCommand):
                                                "%s subscriptions removed at the server.",
                                                 count) % count
                 else:
+                    removed_serials = []
+                    if self.options.pool_ids:
+                        pool_ids = unique_list_items(self.options.pool_ids)  # Don't allow duplicates
+                        pool_id_to_serials = self.entitlement_dir.list_serials_for_pool_ids(pool_ids)
+                        success, failure = self._unbind_ids(self.cp.unbindByPoolId, identity.uuid, pool_ids)
+                        self._print_unbind_ids_result(success, failure, "Pools")
+                        if not success:
+                            return_code = 1
+                        else:
+                            for pool_id in success:
+                                removed_serials.extend(pool_id_to_serials[pool_id])
                     success = []
-                    failure = []
-                    for serial in self.options.serials:
-                        try:
-                            self.cp.unbindBySerial(identity.uuid, serial)
-                            success.append(serial)
-                        except connection.RestlibException, re:
-                            if re.code == 410:
-                                print re.msg
-                                system_exit(os.EX_SOFTWARE)
-                            failure.append(re.msg)
-                    if success:
-                        print _("Serial numbers successfully removed at the server:")
-                        for ser in success:
-                            print "   %s" % ser
-                    if failure:
-                        print _("Serial numbers unsuccessfully removed at the server:")
-                        for fail in failure:
-                            print "   %s" % fail
-                    if not success:
-                        return_code = 1
+                    failure = []  # Clear this list to make sure we don't display the pool ids as serial
+                    if self.options.serials:
+                        serials = unique_list_items(self.options.serials)
+                        serials_to_remove = [serial for serial in serials if serial not in removed_serials]  # Don't remove serials already removed by a pool
+                        success, failure = self._unbind_ids(self.cp.unbindBySerial, identity.uuid, serials_to_remove)
+                        removed_serials.extend(success)
+                        if not success:
+                            return_code = 1
+                    self._print_unbind_ids_result(removed_serials, failure, "Serial numbers")
                 self.entcertlib.update()
             except connection.RestlibException, re:
                 log.error(re)
@@ -1660,14 +1726,18 @@ class RemoveCommand(CliCommand):
                         total = total + 1
                     print (_("%s subscriptions removed from this system.") % total)
                 else:
-                    count = 0
-                    for ent in self.entitlement_dir.list():
-                        if str(ent.serial) in self.options.serials:
-                            ent.delete()
-                            print _("Subscription with serial number %s removed from this system") % str(ent.serial)
-                            count = count + 1
-                    if count == 0:
-                        return_code = 1
+                    if self.options.serials or self.options.pool_ids:
+                        serials = self.options.serials or []
+                        pool_ids = self.options.pool_ids or []
+                        count = 0
+                        for ent in self.entitlement_dir.list():
+                            ent_pool_id = str(getattr(ent.pool, 'id', None) or "")
+                            if str(ent.serial) in serials or ent_pool_id in pool_ids:
+                                ent.delete()
+                                print _("Subscription with serial number %s removed from this system") % str(ent.serial)
+                                count = count + 1
+                        if count == 0:
+                            return_code = 1
             except Exception, e:
                 handle_exception(_("Unable to perform remove due to the following exception: %s") % e, e)
 
@@ -1801,10 +1871,9 @@ class ImportCertCommand(CliCommand):
 
 class PluginsCommand(CliCommand):
     def __init__(self):
-        shortdesc = _("View and configure subscription-manager plugins")
+        shortdesc = _("View and configure with 'subscription-manager plugins'")
         super(PluginsCommand, self).__init__("plugins", shortdesc, False)
 
-        SM = "subscription-manager"
         self.parser.add_option("--list", action="store_true",
                                 help=_("list %s plugins") % SM)
         self.parser.add_option("--listslots", action="store_true",
@@ -1912,7 +1981,7 @@ class ReposCommand(CliCommand):
     def _do_command(self):
         self._validate_options()
         rc = 0
-        if cfg.has_option('rhsm', 'manage_repos') and not int(cfg.get('rhsm', 'manage_repos')):
+        if not manage_repos_enabled():
             print _("Repositories disabled by configuration.")
             return rc
 
@@ -1948,7 +2017,7 @@ class ReposCommand(CliCommand):
                     print("+----------------------------------------------------------+")
 
                     for repo in repos:
-                        print columnize(REPOS_LIST, _echo,
+                        print columnize(REPOS_LIST, echo_columnize_callback,
                             repo.id,
                             repo["name"],
                             repo["baseurl"],
@@ -2182,7 +2251,7 @@ class ListCommand(CliCommand):
 
                 for product in iproducts:
                     status = STATUS_MAP[product[4]]
-                    print columnize(INSTALLED_PRODUCT_STATUS, _none_wrap,
+                    print columnize(INSTALLED_PRODUCT_STATUS, none_wrap_columnize_callback,
                                 product[0], product[1], product[2], product[3],
                                 status, product[5], product[6], product[7]) + "\n"
             else:
@@ -2239,7 +2308,10 @@ class ListCommand(CliCommand):
                         else:
                             data['management_enabled'] = _("No")
 
-                        print columnize(AVAILABLE_SUBS_LIST, _none_wrap,
+                        kwargs = {"filter_string": self.options.filter_string,
+                                  "match_columns": AVAILABLE_SUBS_MATCH_COLUMNS,
+                                  "is_atty": sys.stdout.isatty()}
+                        print columnize(AVAILABLE_SUBS_LIST, highlight_by_filter_string_columnize_callback,
                                 data['productName'],
                                 data['providedProducts'],
                                 data['productId'],
@@ -2252,7 +2324,7 @@ class ListCommand(CliCommand):
                                 data['service_type'] or "",
                                 data['pool_type'],
                                 data['endDate'],
-                                machine_type) + "\n"
+                                machine_type, **kwargs) + "\n"
             elif not self.options.pid_only:
                 if self.options.filter_string and self.options.service_level:
                     print(
@@ -2373,7 +2445,10 @@ class ListCommand(CliCommand):
                         else:
                             reasons.append(_("Subscription management service doesn't support Status Details."))
 
-                        print columnize(CONSUMED_LIST, _none_wrap,
+                        kwargs = {"filter_string": filter_string,
+                                  "match_columns": AVAILABLE_SUBS_MATCH_COLUMNS,
+                                  "is_atty": sys.stdout.isatty()}
+                        print columnize(CONSUMED_LIST, highlight_by_filter_string_columnize_callback,
                             name,
                             product_names,
                             sku,
@@ -2390,7 +2465,7 @@ class ListCommand(CliCommand):
                             pool_type,
                             managerlib.format_date(cert.valid_range.begin()),
                             managerlib.format_date(cert.valid_range.end()),
-                            system_type
+                            system_type, **kwargs
                         ) + "\n"
             elif not pid_only:
                 if filter_string and service_level:
@@ -2472,6 +2547,9 @@ class OverrideCommand(CliCommand):
 
         overrides = Overrides()
 
+        if not manage_repos_enabled():
+            print _("Repositories disabled by configuration.")
+
         if self.options.list:
             results = overrides.get_overrides(self.identity.uuid)
             if results:
@@ -2530,7 +2608,7 @@ class OverrideCommand(CliCommand):
             # Split the list of 2-tuples into a list of names and a list of keys
             names, values = zip(*repo_data)
             names = ["%s:" % x for x in names]
-            print columnize(names, _echo, *values, indent=2) + "\n"
+            print columnize(names, echo_columnize_callback, *values, indent=2) + "\n"
 
 
 class VersionCommand(CliCommand):
@@ -2541,8 +2619,7 @@ class VersionCommand(CliCommand):
         super(VersionCommand, self).__init__("version", shortdesc, False)
 
     def _do_command(self):
-        # FIXME: slightly odd in that we log that we can't get the version,
-        # but then show "unknown" here.
+        self.log_server_version()
         print (_("server type: %s") % self.server_versions["server-type"])
         print (_("subscription management server: %s") % self.server_versions["candlepin"])
         print (_("subscription management rules: %s") % self.server_versions["rules-version"])

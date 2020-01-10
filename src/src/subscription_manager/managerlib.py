@@ -23,8 +23,10 @@ import shutil
 import stat
 import syslog
 
+from rhsm import connection
 from rhsm.config import initConfig
 from rhsm.certificate import Key, CertificateException, create_from_pem
+
 
 import subscription_manager.cache as cache
 from subscription_manager.cert_sorter import StackingGroupSorter, ComplianceManager
@@ -33,7 +35,7 @@ from subscription_manager.facts import Facts
 from subscription_manager.injection import require, CERT_SORTER, \
         IDENTITY, ENTITLEMENT_STATUS_CACHE, \
         PROD_STATUS_CACHE, ENT_DIR, PROD_DIR, CP_PROVIDER, OVERRIDE_STATUS_CACHE, \
-        POOLTYPE_CACHE
+        POOLTYPE_CACHE, RELEASE_STATUS_CACHE
 from subscription_manager import isodate
 from subscription_manager.jsonwrapper import PoolWrapper
 from subscription_manager.repolib import RepoActionInvoker
@@ -598,8 +600,9 @@ class PoolStash(object):
         provided for a given pool. If we do not actually have any info on this
         pool, return None.
         """
-        pool = self.all_pools[pool_id]
+        pool = self.all_pools.get(pool_id)
         if pool is None:
+            log.debug("pool id %s not found in all_pools", pool_id)
             return None
 
         provided_products = []
@@ -785,10 +788,17 @@ def unregister(uep, consumer_uuid):
     """
     Shared logic for un-registration.
     """
-    uep.unregisterConsumer(consumer_uuid)
-    log.info("Successfully un-registered.")
-    system_log("Unregistered machine with identity: %s" % consumer_uuid)
-    clean_all_data(backup=False)
+    try:
+        uep.unregisterConsumer(consumer_uuid)
+        log.info("Successfully un-registered.")
+        system_log("Unregistered machine with identity: %s" % consumer_uuid)
+        clean_all_data(backup=False)
+    except connection.GoneException, ge:
+        if ge.deleted_id == consumer_uuid:
+            log.info("This consumer's profile has been deleted from the server. Local certificates and cache will be cleaned now.")
+            clean_all_data(backup=False)
+        else:
+            raise ge
 
 
 # FIXME: move me to identity.py
@@ -848,14 +858,23 @@ def clean_all_data(backup=True):
     else:
         log.warn("Entitlement cert directory does not exist: %s" % ent_cert_dir)
 
+    # Subclasses of cache.CacheManager have a @classmethod delete_cache
+    # for deleting persistent caches
     cache.ProfileManager.delete_cache()
     cache.InstalledProductsManager.delete_cache()
     Facts.delete_cache()
 
-    # Must also delete in-memory cache
+    # WrittenOverridesCache is also a subclass of cache.CacheManager, but
+    # it is deleted in RepoActionInvoker.delete_repo_file() below.
+
+    # StatusCache subclasses have a a per instance cache varable
+    # and delete_cache is an instance method, so we need to call
+    # the delete_cache on the instances created in injectioninit.
     require(ENTITLEMENT_STATUS_CACHE).delete_cache()
     require(PROD_STATUS_CACHE).delete_cache()
     require(OVERRIDE_STATUS_CACHE).delete_cache()
+    require(RELEASE_STATUS_CACHE).delete_cache()
+
     RepoActionInvoker.delete_repo_file()
     log.info("Cleaned local data")
 

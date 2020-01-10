@@ -1,4 +1,6 @@
-#!/usr/bin/python
+#!/usr/bin/python -Es
+# ^ is to prevent selinux denials trying to load modules from unintended
+#   paths. See https://bugzilla.redhat.com/show_bug.cgi?id=1136163
 #
 # Copyright (c) 2012 Red Hat, Inc.
 #
@@ -22,6 +24,9 @@ import logging
 from subscription_manager import logutil
 
 from rhsm import connection
+
+from subscription_manager import ga_loader
+ga_loader.init_ga()
 
 from subscription_manager.injectioninit import init_dep_injection
 init_dep_injection()
@@ -61,10 +66,31 @@ def main(options, log):
         raise e
     except connection.GoneException, ge:
         uuid = ConsumerIdentity.read().getConsumerId()
+
+        # This code is to prevent an errant 410 response causing consumer cert deletion.
+        #
+        # If a server responds with a 410, we want to very that it's not just a 410 http status, but
+        # also that the response is from candlepin, and include the right info about the consumer.
+        #
+        # A connection to the entitlement server could get an unintentional 410 response. A common
+        # cause for that kind of error would be a bug or crash or misconfiguration of a reverse proxy
+        # in front of candlepin. Most error codes we treat as temporary and transient, and they don't
+        # cause any action to be taken (aside from error handling). But since consumer deletion is tied
+        # to the 410 status code, and that is difficult to recover from, we try to be a little bit
+        # more paranoid about that case.
+        #
+        # So we look for both the 410 status, and the expected response body. If we get those
+        # then python-rhsm will create a GoneException that includes the deleted_id. If we get
+        # A GoneException and the deleted_id matches, then we actually delete the consumer.
+        #
+        # However... If we get a GoneException and it's deleted_id does not match the current
+        # consumer uuid, we do not delete the consumer. That would require using a valid consumer
+        # cert, but making a request for a different consumer uuid, so unlikely. Could register
+        # with --consumerid get there?
         if ge.deleted_id == uuid:
-            log.critical(_("This consumer's profile has been deleted from the server. Its local certificates will now be archived"))
+            log.critical("Consumer profile \"%s\" has been deleted from the server. Its local certificates will now be archived", uuid)
             managerlib.clean_all_data()
-            log.critical(_("Certificates archived to '/etc/pki/consumer.old'. Contact your system administrator if you need more information."))
+            log.critical("Certificates archived to '/etc/pki/consumer.old'. Contact your system administrator if you need more information.")
 
         raise ge
 
