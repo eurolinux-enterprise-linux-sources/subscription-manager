@@ -1,4 +1,8 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+from __future__ import print_function, division, absolute_import
+
 #
 # wrapper for subscription Manager commandline tool.
 #
@@ -22,6 +26,13 @@
 if __name__ != '__main__':
     raise ImportError("module cannot be imported")
 
+# hack to allow bytes/strings to be interpolated w/ unicode values (gettext gives us bytes)
+# Without this, for example, "Формат: %s\n" % u"foobar" will fail with UnicodeDecodeError
+# See http://stackoverflow.com/a/29832646/6124862 for more details
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
 import warnings
 # this is a deprecation warning we see on rhel6, but the
 # functionality doesn't seem to exist in public api yet
@@ -31,17 +42,15 @@ warnings.filterwarnings(action="ignore",
                         category=DeprecationWarning,
                         message="^The dbus_bindings module is not public API and will go away soon.")
 
-import sys
 import os
 import dbus
 import dbus.service
 import dbus.glib
 import dbus.exceptions
 import logging
-import gettext
 import signal
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -108,6 +117,11 @@ _LIBPATH = "/usr/share/rhsm"
 if _LIBPATH not in sys.path:
     sys.path.append(_LIBPATH)
 
+# quick check to see if you are a super-user.
+if os.getuid() != 0:
+    sys.stderr.write('Error: must be root to execute\n')
+    sys.exit(8)
+
 try:
     from subscription_manager import ga_loader
     ga_loader.init_ga()
@@ -117,21 +131,20 @@ try:
 except RuntimeError, e:
     system_exit(2, "Unable to start.  Error: %s" % e)
 
-# quick check to see if you are a super-user.
-if os.getuid() != 0:
-    sys.stderr.write('Error: must be root to execute\n')
-    sys.exit(8)
-
 try:
     # this has to be done first thing due to module level translated vars.
     from subscription_manager.i18n import configure_i18n
-    configure_i18n(with_glade=True)
+    configure_i18n()
 
     from subscription_manager import logutil
     logutil.init_logger()
 
     from subscription_manager.injectioninit import init_dep_injection
     init_dep_injection()
+
+    import subscription_manager.injection as inj
+    # Set up DBus mainloop via DBUS_IFACE
+    inj.require(inj.DBUS_IFACE)
 
     from subscription_manager.gui import managergui
     from subscription_manager.i18n_optparse import OptionParser, \
@@ -162,7 +175,7 @@ def already_running(bus):
 
     if bus and ((request_name_res != REQUEST_NAME_REPLY_PRIMARY_OWNER) and
        (request_name_res != REQUEST_NAME_REPLY_ALREADY_OWNER)):
-        print _("%s is already running") % "subscription-manager-gui"
+        print(_("%s is already running") % "subscription-manager-gui")
         return True
     return False
 

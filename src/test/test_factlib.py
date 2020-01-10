@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2011 Red Hat, Inc.
 #
@@ -12,19 +14,18 @@
 #
 
 
-import stubs
-import fixture
+from . import stubs
+from . import fixture
 
 from subscription_manager import factlib
 from subscription_manager import injection as inj
 
 
 class TestFactlib(fixture.SubManFixture):
-
     def setUp(self):
         super(TestFactlib, self).setUp()
-        #self.stub_uep = stubs.StubUEP()
-        self.expected_facts = {'fact1': 'F1', 'fact2': 'F2'}
+        # As set in fixture.py:
+        self.expected_facts = {"mock.facts": "true"}
 
         inj.provide(inj.FACTS, stubs.StubFacts(self.expected_facts))
         self.fl = factlib.FactsActionInvoker()
@@ -33,10 +34,9 @@ class TestFactlib(fixture.SubManFixture):
         self._inject_mock_invalid_consumer()
         update_report = self.fl.update()
         count = update_report.updates()
-        self.assertEquals(len(self.expected_facts), count)
+        self.assertEqual(len(self.expected_facts), count)
 
     def test_factlib_updates_when_identity_exists(self):
-
         invalid_consumer = self._inject_mock_valid_consumer()
         self.facts_passed_to_server = None
         self.consumer_uuid_passed_to_server = None
@@ -51,15 +51,6 @@ class TestFactlib(fixture.SubManFixture):
 
         update_report = self.fl.update()
         count = update_report.updates()
-        self.assertEquals(len(self.expected_facts), count)
-        self.assertEquals(self.expected_facts, self.facts_passed_to_server)
-        self.assertEquals(invalid_consumer.uuid, self.consumer_uuid_passed_to_server)
-
-
-class ConsumerIdentityExistsStub(stubs.StubConsumerIdentity):
-    def __init__(self, keystring, certstring):
-        super(ConsumerIdentityExistsStub, self).__init__(keystring, certstring)
-
-    @classmethod
-    def exists(cls):
-        return True
+        self.assertEqual(len(self.expected_facts), count)
+        self.assertEqual(self.expected_facts, self.facts_passed_to_server)
+        self.assertEqual(invalid_consumer.uuid, self.consumer_uuid_passed_to_server)

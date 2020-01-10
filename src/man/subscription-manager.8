@@ -149,6 +149,10 @@ Gives the username to use to authenticate to the HTTP proxy.
 .B --proxypass=PROXYPASSWORD
 Gives the password to use to authenticate to the HTTP proxy.
 
+.TP
+.B --noproxy=NOPROXY
+Specifies a list of domain suffixes which should bypass the HTTP proxy.
+
 .SS REGISTER OPTIONS
 The
 .B register
@@ -175,8 +179,23 @@ parameter is for the on-premise Subscription Asset Manager server.
 .B --baseurl=https://CONTENT_SERVICE:PORT/PREFIX
 Passes the name of the content delivery service to configure the yum service to use to pull down packages. If there is an on-premise subscription service such as Subscription Asset Manager or CloudForms System Engine, this parameter can be used to submit the URL of the content repository, in the form
 .I https://server_name:port/prefix.
+.B PREFIX
+in particular depends on the service type.
 For example,
-.B https://sam.example.com:8088/sam.
+.B https://sam.example.com:8088/sam
+is the
+.B baseurl
+for a SAM service.
+.B https://sat6.example.com/pulp/repos
+is the
+.B baseurl
+for a Satellite 6 service with the hostname
+.B sat6.example.com
+\&.
+.B https://cdn.redhat.com
+is the
+.B baseurl
+for the Red Hat CDN.
 
 
 .TP
@@ -235,19 +254,6 @@ Registers the system to an environment within an organization.
 .TP
 .B --release=VERSION
 Shortcut for "release --set=VERSION"
-
-.TP
-.B --type=CONSUMERTYPE
-Sets the type of unit to register. Most units in the inventory will use the default value of
-.B system.
-For development or test units, this can be
-.B person
-, which indicates a personal (rather than organizational) unit. Another type of unit can be
-.B candlepin
-for a local content service or
-.B domain
-for an IP domain.
-
 
 .SS UNREGISTER OPTIONS
 The
@@ -859,17 +865,6 @@ there will be errors about being unable to load the owners interface.
 
 
 .PP
-Some information is assigned automatically. Subscription Manager automatically generates a unique ID for the system which is used by the subscription management service and it assigns a unit type, which indicates what kinds of software are available for the system. The name for the entry can be manually assigned (for use within an on-premise subscription service, for instance). A handful of subscriptions (such as specialized servers for content or identity management) have their own specific unit type. For example:
-
-.RS
-.nf
-subscription-manager register --username=admin
---password=secret --type=system --name=server1
---org="IT Dept"
-.fi
-.RE
-
-.PP
 If a system is registered and then somehow its subscription information is lost -- a drive crashes or the certificates are deleted or corrupted -- the system can be re-registered, with all of its subscriptions restored, by registering with the existing ID.
 
 .RS
@@ -1240,7 +1235,54 @@ For information about the network addresses that
 .B subscription-manager
 and the
 .B subscription-manager yum plugin
-use see https://access.redhat.com/site/articles/414963
+use see https://access.redhat.com/site/solutions/59586
+
+.SH PROXY CONFIGURATION
+.B subscription-manager
+can be configured to use a proxy in several ways:
+.IP
+* via standard
+.B HTTP_PROXY
+,
+.B HTTPS_PROXY
+,
+.B NO_PROXY
+environment variables (environment-level settings)
+.IP
+* via options in
+.B /etc/rhsm/rhsm.conf
+(application-level settings)
+.IP
+* via command-line arguments (command-level overrides)
+
+.PP
+Although
+.B subscription-manager
+respects environment variables for proxy configuration, this should be avoided in favor of the configuration file, because the daemons (ex.
+.B rhsmcertd
+and
+.B rhsmd
+) do not provide ways to modify their environments.
+
+Each option of the proxy configuration (hostname, port, host/domain pattern blacklist, username, password) is read independently, with precedence being command-line over configuration over environment, and then the resulting set of options is used to configure the proxy configuration.
+
+For example,
+if the
+.B HTTP_PROXY
+environment variable is set and
+.B no_proxy
+is set in
+.B /etc/rhsm/rhsm.conf
+then both are present in the effective proxy configuration.
+
+If two equivalent options are set in different places, then the precedence determines which value is effective.
+
+For example,
+the
+.B NO_PROXY
+environment variable is set and the
+.B no_proxy
+configuration file option is set, then the value from the configuration file is the effective value.
 
 .SH FILES
 .IP

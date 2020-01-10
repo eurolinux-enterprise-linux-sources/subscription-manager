@@ -1,9 +1,11 @@
+from __future__ import print_function, division, absolute_import
+
 import difflib
 import locale
 import os
 import pprint
+import six
 import sys
-import StringIO
 import tempfile
 
 try:
@@ -23,19 +25,26 @@ except AttributeError:
 from mock import Mock, MagicMock, NonCallableMock, patch, mock_open
 from contextlib import contextmanager
 
-import stubs
+from . import stubs
 import subscription_manager.injection as inj
 import subscription_manager.managercli
+from rhsmlib.services import config
 
 # use instead of the normal pid file based ActionLock
 from threading import RLock
 
 
 @contextmanager
-def open_mock(content, **kwargs):
+def open_mock(content=None, **kwargs):
+    content_out = six.StringIO()
     m = mock_open(read_data=content)
-    with patch('__builtin__.open', m, create=True, **kwargs) as m:
-        yield m
+    with patch('__builtin__.open', m, create=True, **kwargs) as mo:
+        stream = six.StringIO(content)
+        rv = mo.return_value
+        rv.write = lambda x: content_out.write(x)
+        rv.content_out = lambda: content_out.getvalue()
+        rv.__iter__ = lambda x: iter(stream.readlines())
+        yield rv
 
 
 @contextmanager
@@ -63,7 +72,7 @@ def locale_context(new_locale, category=None):
         locale.setlocale(category, old_locale)
 
 
-class FakeLogger:
+class FakeLogger(object):
     def __init__(self):
         self.expected_msg = ""
         self.msg = None
@@ -82,6 +91,9 @@ class FakeLogger:
         self.expected_msg = msg
 
     def info(self, buf, *args, **kwargs):
+        self.msg = buf
+
+    def warning(self, buf, *args, **kwargs):
         self.msg = buf
 
 
@@ -108,18 +120,38 @@ class Matcher(object):
 
 
 class SubManFixture(unittest.TestCase):
+    def set_facts(self):
+        """Override if you need to set facts for a test."""
+        return {"mock.facts": "true"}
+
     """
     Can be extended by any subscription manager test case to make
     sure nothing on the actual system is read/touched, and appropriate
     mocks/stubs are in place.
     """
     def setUp(self):
+        # No matter what, stop all patching (even if we have a failure in setUp itself)
         self.addCleanup(patch.stopall)
 
         # Never attempt to use the actual managercli.cfg which points to a
         # real file in etc.
-        cfg_patcher = patch.object(subscription_manager.managercli, 'cfg', new=stubs.config.CFG)
-        self.mock_cfg = cfg_patcher.start()
+
+        self.mock_cfg_parser = stubs.StubConfig()
+
+        original_conf = subscription_manager.managercli.conf
+
+        def unstub_conf():
+            subscription_manager.managercli.conf = original_conf
+
+        # Mock makes it damn near impossible to mock a module attribute (which we shouldn't be using
+        # in the first place because it's terrible) so we monkey-patch it ourselves.
+        # TODO Fix this idiocy by not reading the damn config on module import
+        subscription_manager.managercli.conf = config.Config(self.mock_cfg_parser)
+        self.addCleanup(unstub_conf)
+
+        facts_host_patcher = patch('rhsmlib.dbus.facts.FactsClient', auto_spec=True)
+        self.mock_facts_host = facts_host_patcher.start()
+        self.mock_facts_host.return_value.GetFacts.return_value = self.set_facts()
 
         # By default mock that we are registered. Individual test cases
         # can override if they are testing disconnected scenario.
@@ -136,7 +168,7 @@ class SubManFixture(unittest.TestCase):
         self.mock_calc.calculate.return_value = None
 
         # Avoid trying to read real /etc/yum.repos.d/redhat.repo
-        self.mock_repofile_path_exists_patcher = patch('subscription_manager.repolib.RepoFile.path_exists')
+        self.mock_repofile_path_exists_patcher = patch('subscription_manager.repolib.YumRepoFile.path_exists')
         mock_repofile_path_exists = self.mock_repofile_path_exists_patcher.start()
         mock_repofile_path_exists.return_value = True
 
@@ -144,6 +176,7 @@ class SubManFixture(unittest.TestCase):
         inj.provide(inj.PRODUCT_DATE_RANGE_CALCULATOR, self.mock_calc)
 
         inj.provide(inj.ENTITLEMENT_STATUS_CACHE, stubs.StubEntitlementStatusCache())
+        inj.provide(inj.POOL_STATUS_CACHE, stubs.StubPoolStatusCache())
         inj.provide(inj.PROD_STATUS_CACHE, stubs.StubProductStatusCache())
         inj.provide(inj.OVERRIDE_STATUS_CACHE, stubs.StubOverrideStatusCache())
         inj.provide(inj.RELEASE_STATUS_CACHE, stubs.StubReleaseStatusCache())
@@ -180,6 +213,9 @@ class SubManFixture(unittest.TestCase):
         self.stub_facts = stubs.StubFacts()
         inj.provide(inj.FACTS, self.stub_facts)
 
+        content_access_cache_mock = MagicMock(name='ContentAccessCacheMock')
+        inj.provide(inj.CONTENT_ACCESS_CACHE, content_access_cache_mock)
+
         self.dbus_patcher = patch('subscription_manager.managercli.CliCommand._request_validity_check')
         self.dbus_patcher.start()
 
@@ -200,6 +236,8 @@ class SubManFixture(unittest.TestCase):
         self.files_to_cleanup = []
 
     def tearDown(self):
+        if not hasattr(self, 'files_to_cleanup'):
+            return
         for f in self.files_to_cleanup:
             # Assuming these are tempfile.NamedTemporaryFile, created with
             # the write_tempfile() method in this class.
@@ -244,7 +282,7 @@ class SubManFixture(unittest.TestCase):
         return identity
 
     def _inject_mock_invalid_consumer(self, uuid=None):
-        """For chaning injected consumer identity to one that fails is_valid()
+        """For chaining injected consumer identity to one that fails is_valid()
 
         Returns the injected identity if it need to be examined.
         """
@@ -322,7 +360,7 @@ class SubManFixture(unittest.TestCase):
 class Capture(object):
     class Tee(object):
         def __init__(self, stream, silent):
-            self.buf = StringIO.StringIO()
+            self.buf = six.StringIO()
             self.stream = stream
             self.silent = silent
 
@@ -330,6 +368,9 @@ class Capture(object):
             self.buf.write(data)
             if not self.silent:
                 self.stream.write(data)
+
+        def flush(self):
+            pass
 
         def getvalue(self):
             return self.buf.getvalue()

@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 - 2012 Red Hat, Inc.
 #
@@ -12,9 +14,7 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
 import errno
-import gettext
 import optparse
 import os
 import sys
@@ -30,18 +30,20 @@ from subscription_manager.managercli import CliCommand
 from subscription_manager.cli import InvalidCLIOptionError, system_exit
 from rhsm import ourjson as json
 from rhsm.config import initConfig
+from rhsmlib.services import config
 
-_ = gettext.gettext
-
-cfg = initConfig()
+from subscription_manager.i18n import ugettext as _
 
 log = logging.getLogger('rhsm-app.' + __name__)
+
+conf = config.Config(initConfig())
 
 ERR_NOT_REGISTERED_MSG = _("This system is not yet registered. Try 'subscription-manager register --help' for more information.")
 ERR_NOT_REGISTERED_CODE = 1
 
 ASSEMBLE_DIR = '/var/spool/rhsm/debug'
-ROOT_READ_ONLY = 0600
+ROOT_READ_ONLY_DIR = 0o700
+ROOT_READ_ONLY_FILE = 0o600
 KEY_IGNORE_PATS = ['*key.pem']
 
 
@@ -134,7 +136,7 @@ class SystemCommand(CliCommand):
 
             # FIXME: we need to anon proxy passwords?
             sos = self.options.sos
-            defaults = cfg.defaults()
+            defaults = conf.defaults()
             # sosreport collects /etc/rhsm/* and /var/*/rhsm/*, so these would
             # be redundant for sos
             if not sos:
@@ -146,29 +148,29 @@ class SystemCommand(CliCommand):
             if not sos:
                 self._copy_cert_directory('/etc/pki/product-default', content_path)
 
-            if defaults['productcertdir'] != cfg.get('rhsm', 'productCertDir') or not sos:
-                self._copy_cert_directory(cfg.get('rhsm', 'productCertDir'), content_path)
+            if defaults['productcertdir'] != conf['rhsm']['productCertDir'] or not sos:
+                self._copy_cert_directory(conf['rhsm']['productCertDir'], content_path)
 
-            if defaults['entitlementcertdir'] != cfg.get('rhsm', 'entitlementCertDir') or not sos:
-                self._copy_cert_directory(cfg.get('rhsm', 'entitlementCertDir'), content_path)
+            if defaults['entitlementcertdir'] != conf['rhsm']['entitlementCertDir'] or not sos:
+                self._copy_cert_directory(conf['rhsm']['entitlementCertDir'], content_path)
 
-            if defaults['consumercertdir'] != cfg.get('rhsm', 'consumerCertDir') or not sos:
-                self._copy_cert_directory(cfg.get('rhsm', 'consumerCertDir'), content_path)
+            if defaults['consumercertdir'] != conf['rhsm']['consumerCertDir'] or not sos:
+                self._copy_cert_directory(conf['rhsm']['consumerCertDir'], content_path)
 
             # If ca_cert_dir and pluginconfdif are configured as subdirs of /etc/rhsm
             # (as is the default) we will have already copied there contents,
             # so ignore directory exists errors
             try:
-                if defaults['ca_cert_dir'] != cfg.get('rhsm', 'ca_cert_dir') or not sos:
-                    self._copy_cert_directory(cfg.get('rhsm', 'ca_cert_dir'), content_path)
-            except EnvironmentError, e:
+                if defaults['ca_cert_dir'] != conf['rhsm']['ca_cert_dir'] or not sos:
+                    self._copy_cert_directory(conf['rhsm']['ca_cert_dir'], content_path)
+            except EnvironmentError as e:
                 if e.errno != errno.EEXIST:
                     raise
 
             try:
-                if defaults['pluginconfdir'] != cfg.get('rhsm', 'pluginconfdir') or not sos:
-                    self._copy_directory(cfg.get('rhsm', 'pluginconfdir'), content_path)
-            except EnvironmentError, e:
+                if defaults['pluginconfdir'] != conf['rhsm']['pluginconfdir'] or not sos:
+                    self._copy_directory(conf['rhsm']['pluginconfdir'], content_path)
+            except EnvironmentError as e:
                 if e.errno != errno.EEXIST:
                     raise
 
@@ -186,7 +188,7 @@ class SystemCommand(CliCommand):
 
                 sfm = SaferFileMove()
                 sfm.move(tar_file_path, final_path)
-                print _("Wrote: %s") % final_path
+                print(_("Wrote: %s") % final_path)
             else:
                 # NOTE: this will fail across filesystems. We could add a force
                 # flag to for creation of a specific name with approriate
@@ -200,9 +202,9 @@ class SystemCommand(CliCommand):
                 # rename only works on the same filesystem, but it is atomic.
                 os.rename(content_path, dest_dir_name)
 
-                print _("Wrote: %s") % dest_dir_name
+                print(_("Wrote: %s") % dest_dir_name)
 
-        except Exception, e:
+        except Exception as e:
             managercli.handle_exception(_("Unable to create zip file of system information: %s") % e, e)
             sys.exit(os.EX_SOFTWARE)
         finally:
@@ -215,8 +217,7 @@ class SystemCommand(CliCommand):
     def _get_version_info(self):
         return {"server type": self.server_versions["server-type"],
                 "subscription management server": self.server_versions["candlepin"],
-                "subscription-manager": self.client_versions["subscription-manager"],
-                "python-rhsm": self.client_versions["python-rhsm"]}
+                "subscription-manager": self.client_versions["subscription-manager"]}
 
     def _write_flat_file(self, content_path, filename, content):
         path = os.path.join(content_path, filename)
@@ -239,7 +240,7 @@ class SystemCommand(CliCommand):
                              KEY_IGNORE_PATS)
 
     def _makedir(self, dest_dir_name):
-        os.makedirs(dest_dir_name, ROOT_READ_ONLY)
+        os.makedirs(dest_dir_name, ROOT_READ_ONLY_DIR)
 
 
 class SaferFileMove(object):
@@ -256,7 +257,7 @@ class SaferFileMove(object):
         # based on shutils copyfileob
         self.buf_size = 16 * 1024
         # only root can read
-        self.default_perms = ROOT_READ_ONLY
+        self.default_perms = ROOT_READ_ONLY_FILE
 
     def move(self, src, dest):
         """Move a file to a dest dir, potentially /tmp more safely.
@@ -277,7 +278,7 @@ class SaferFileMove(object):
                                  self.default_perms), 'w+')
 
     def _copyfileobj(self, src_fo, dest_fo):
-        while 1:
+        while True:
             buf = src_fo.read(self.buf_size)
             if not buf:
                 break

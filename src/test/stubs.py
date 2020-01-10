@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -14,8 +16,8 @@
 #
 
 from collections import defaultdict
-import StringIO
 from datetime import datetime, timedelta
+import six
 import mock
 import random
 import tempfile
@@ -23,7 +25,8 @@ import tempfile
 from rhsm import config
 from subscription_manager.cert_sorter import CertSorter
 from subscription_manager.cache import EntitlementStatusCache, ProductStatusCache, \
-        OverrideStatusCache, ProfileManager, InstalledProductsManager, ReleaseStatusCache
+        OverrideStatusCache, ProfileManager, InstalledProductsManager, ReleaseStatusCache, \
+        PoolStatusCache
 from subscription_manager.facts import Facts
 from subscription_manager.lock import ActionLock
 from rhsm.certificate import GMT
@@ -35,9 +38,8 @@ from rhsm.certificate import parse_tags
 from rhsm.certificate2 import EntitlementCertificate, ProductCertificate, \
         Product, Content, Order
 from rhsm import profile
-
-
 from rhsm import ourjson as json
+from rhsm.certificate2 import CONTENT_ACCESS_CERT_TYPE
 
 # config file is root only, so just fill in a stringbuffer
 cfg_buf = """
@@ -55,6 +57,7 @@ proxy_hostname = notaproxy.grimlock.usersys.redhat.com
 proxy_port = 3128
 proxy_user = proxy_user
 proxy_password = proxy_password
+no_proxy =
 
 [rhsm]
 baseurl= https://content.example.com
@@ -62,6 +65,7 @@ repo_ca_cert = %(ca_cert_dir)sredhat-uep.pem
 productCertDir = /etc/pki/product
 entitlementCertDir = /etc/pki/entitlement
 consumerCertDir = /etc/pki/consumer
+ca_cert_dir = /etc/rhsm/ca/
 
 [rhsmcertd]
 certCheckInterval = 240
@@ -81,7 +85,7 @@ class StubConfig(config.RhsmConfigParser):
 
     # instead of reading a file, let's use the stringio
     def read(self, filename):
-        self.readfp(StringIO.StringIO(cfg_buf), "foo.conf")
+        self.readfp(six.StringIO(cfg_buf), "foo.conf")
 
     # this way our test can put some values in and have them used during the run
     def get(self, section, key):
@@ -108,7 +112,7 @@ class StubConfig(config.RhsmConfigParser):
         # section and iterate over them with their values.
         items_from_store = self.store[section]
         if len(items_from_store) > 0:
-            return items_from_store.items()
+            return list(items_from_store.items())
         return config.RhsmConfigParser.items(self, section)
 
     def save(self, config_file=None):
@@ -116,13 +120,12 @@ class StubConfig(config.RhsmConfigParser):
             raise IOError
         return None
 
-    # replace read with readfp on stringio
-
 
 def stubInitConfig():
     return StubConfig()
 
-# create a global CFG object,then replace it with out own that candlepin
+
+# create a global CFG object,then replace it with our own that candlepin
 # read from a stringio
 config.initConfig(config_file="test/rhsm.conf")
 config.CFG = StubConfig()
@@ -206,10 +209,12 @@ class StubProductCertificate(ProductCertificate):
         if not end_date:
             end_date = datetime.now() + timedelta(days=365)
 
+        path = "/path/to/fake_product.pem"
+
         super(StubProductCertificate, self).__init__(products=products,
                                                      serial=random.randint(1, 10000000),
                                                      start=start_date, end=end_date,
-                                                     version=version)
+                                                     version=version, path=path)
 
     def __str__(self):
         s = []
@@ -224,7 +229,7 @@ class StubEntitlementCertificate(EntitlementCertificate):
 
     def __init__(self, product, provided_products=None, start_date=None, end_date=None,
             content=None, quantity=1, stacking_id=None, sockets=2, service_level=None,
-            ram=None, pool=None, ent_id=None):
+            ram=None, pool=None, ent_id=None, entitlement_type=None):
 
         # If we're given strings, create stub products for them:
         if isinstance(product, str):
@@ -275,6 +280,12 @@ class StubEntitlementCertificate(EntitlementCertificate):
         if ent_id:
             self.subject = {'CN': ent_id}
 
+        self._entitlement_type = entitlement_type or 'Basic'
+
+    @property
+    def entitlement_type(self):
+        return self._entitlement_type
+
     def delete(self):
         self.is_deleted = True
 
@@ -319,6 +330,16 @@ class StubCertificateDirectory(EntitlementDirectory):
 # so we can use a less confusing name when we use this stub
 class StubEntitlementDirectory(StubCertificateDirectory):
     path = "this/is/a/stub/ent/cert/dir"
+
+    def list_valid_with_content_access(self):
+        return [x for x in self.list_with_content_access() if self._check_key(x) and x.is_valid()]
+
+    def list(self):
+        certs = super(StubEntitlementDirectory, self).list()
+        return [cert for cert in certs if cert.entitlement_type != CONTENT_ACCESS_CERT_TYPE]
+
+    def list_with_content_access(self):
+        return super(StubEntitlementDirectory, self).list()
 
 
 class StubProductDirectory(StubCertificateDirectory, ProductDirectory):
@@ -390,7 +411,7 @@ class StubUEP(object):
                  username=None, password=None,
                  proxy_hostname=None, proxy_port=None,
                  proxy_user=None, proxy_password=None,
-                 cert_file=None, key_file=None):
+                 cert_file=None, key_file=None, restlib_class=None):
         self.registered_consumer_info = {"uuid": 'dummy-consumer-uuid'}
         self.environment_list = []
         self.called_unregister_uuid = None
@@ -455,6 +476,8 @@ class StubUEP(object):
     def getConsumer(self, consumerId, username=None, password=None):
         if hasattr(self, 'consumer') and self.consumer:
             return self.consumer
+        if six.callable(self.registered_consumer_info):
+            return self.registered_consumer_info()
         return self.registered_consumer_info
 
     def unbindAll(self, consumer):
@@ -591,13 +614,19 @@ class StubCPProvider(object):
         proxy_hostname_arg=None,
         proxy_port_arg=None,
         proxy_user_arg=None,
-        proxy_password_arg=None):
+        proxy_password_arg=None,
+        no_proxy_arg=None,
+        correlation_id=None,
+        restlib_class=None):
         pass
 
     def set_content_connection_info(self, cdn_hostname=None, cdn_port=None):
         pass
 
     def set_user_pass(self, username=None, password=None):
+        pass
+
+    def set_correlation_id(self, correlation_id):
         pass
 
     # tries to write to /var/lib and it reads the rpm db
@@ -618,6 +647,15 @@ class StubCPProvider(object):
 
 
 class StubEntitlementStatusCache(EntitlementStatusCache):
+
+    def write_cache(self):
+        pass
+
+    def delete_cache(self):
+        self.server_status = None
+
+
+class StubPoolStatusCache(PoolStatusCache):
 
     def write_cache(self):
         pass
@@ -666,7 +704,7 @@ class StubAsyncUpdater(AsyncWidgetUpdater):
             result = backend_method(*args, **kwargs)
             if callback:
                 callback(result)
-        except Exception, e:
+        except Exception as e:
             message = exception_msg or str(e)
             handle_gui_exception(e, message, self.parent_window)
         finally:

@@ -1,5 +1,0 @@
-[D-BUS Service]
-Name=com.redhat.SubscriptionManager
-Exec=/usr/libexec/rhsmd
-User=root
-

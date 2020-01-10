@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2014 Red Hat, Inc.
 #
@@ -12,13 +14,11 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 import socket
 
-from rhsm.config import initConfig
 from rhsm.certificate import Key, create_from_pem
+from rhsm.certificate2 import CONTENT_ACCESS_CERT_TYPE
 
 from subscription_manager.certdirectory import Writer
 from subscription_manager import certlib
@@ -28,12 +28,11 @@ from subscription_manager.injection import IDENTITY, require
 from subscription_manager import rhelentbranding
 import subscription_manager.injection as inj
 
+from subscription_manager.i18n import ungettext, ugettext as _
 
 log = logging.getLogger(__name__)
 
-_ = gettext.gettext
-
-cfg = initConfig()
+CONTENT_ACCESS_CERT_CAPABILITY = "org_level_content_access"
 
 
 class EntCertActionInvoker(certlib.BaseActionInvoker):
@@ -110,6 +109,7 @@ class EntCertUpdateAction(object):
         self.ent_dir = inj.require(inj.ENT_DIR)
         self.identity = require(IDENTITY)
         self.report = EntCertUpdateReport()
+        self.content_access_cache = inj.require(inj.CONTENT_ACCESS_CACHE)
 
     # NOTE: this is slightly at odds with the manual cert import
     #       path, manual import certs wont get a 'report', etc
@@ -117,7 +117,7 @@ class EntCertUpdateAction(object):
         local = self._get_local_serials()
         try:
             expected = self._get_expected_serials()
-        except socket.error, ex:
+        except socket.error as ex:
             log.exception(ex)
             log.error('Cannot modify subscriptions while disconnected')
             raise Disconnected()
@@ -138,6 +138,7 @@ class EntCertUpdateAction(object):
             # we need to refresh the ent_dir object before calling
             # content updating actions.
             self.ent_dir.refresh()
+            self.content_access_hook()
             self.repo_hook()
 
             # NOTE: Since we have the yum repos defined here now
@@ -147,6 +148,25 @@ class EntCertUpdateAction(object):
 
             # reload certs and update branding
             self.branding_hook()
+
+        if self.uep.has_capability(CONTENT_ACCESS_CERT_CAPABILITY):
+            content_access_certs = self._find_content_access_certs()
+            update_data = None
+            if len(content_access_certs) > 0:
+                # This address BZ: 1448855, 1450862
+                if len(expected) < len(content_access_certs):
+                    obsolete_certs = []
+                    for cont_access_cert in content_access_certs:
+                        if cont_access_cert.serial not in expected:
+                            obsolete_certs.append(cont_access_cert)
+                    log.info('Deleting obsolete content access certificate')
+                    self.delete(obsolete_certs)
+                update_data = self.content_access_cache.check_for_update()
+                for content_access_cert in content_access_certs:
+                    self.content_access_cache.update_cert(content_access_cert, update_data)
+            if update_data is not None:
+                self.ent_dir.refresh()
+                self.repo_hook()
 
         # if we want the full report, we can get it, but
         # this makes CertLib.update() have same sig as reset
@@ -160,6 +180,24 @@ class EntCertUpdateAction(object):
 
         ent_cert_bundles_installer = EntitlementCertBundlesInstaller(self.report)
         ent_cert_bundles_installer.install(cert_bundles)
+
+    def _find_content_access_certs(self):
+        certs = self.ent_dir.list_with_content_access()
+        return [cert for cert in certs if cert.entitlement_type == CONTENT_ACCESS_CERT_TYPE]
+
+    def content_access_hook(self):
+        if not self.uep.has_capability(CONTENT_ACCESS_CERT_CAPABILITY):
+            return  # do nothing if we cannot check for content access cert updates
+        content_access_certs = self._find_content_access_certs()
+        update_data = None
+        if len(content_access_certs) > 0:
+            update_data = self.content_access_cache.check_for_update()
+        for content_access_cert in content_access_certs:
+            self.content_access_cache.update_cert(content_access_cert, update_data)
+        if len(content_access_certs) == 0 and self.content_access_cache.exists():
+            self.content_access_cache.remove()
+        if update_data is not None:
+            self.ent_dir.refresh()
 
     def branding_hook(self):
         """Update branding info based on entitlement cert changes."""
@@ -175,7 +213,7 @@ class EntCertUpdateAction(object):
             # NOTE: this may need a lock
             content_action = content_action_client.ContentActionClient()
             content_action.update()
-        except Exception, e:
+        except Exception as e:
             log.debug(e)
             log.debug("Failed to update repos")
 
@@ -186,7 +224,7 @@ class EntCertUpdateAction(object):
 
     def _find_rogue_serials(self, local, expected):
         """Find serials we have locally but are not on the server."""
-        rogue = [local[sn] for sn in local if not sn in expected]
+        rogue = [local[sn] for sn in local if sn not in expected]
         return rogue
 
     def syslog_results(self):
@@ -206,9 +244,9 @@ class EntCertUpdateAction(object):
 
     def _get_local_serials(self):
         local = {}
-        #certificates in grace period were being renamed everytime.
-        #this makes sure we don't try to re-write certificates in
-        #grace period
+        # certificates in grace period were being renamed everytime.
+        # this makes sure we don't try to re-write certificates in
+        # grace period
         # XXX since we don't use grace period, this might not be needed
         self.ent_dir.refresh()
         for valid in self.ent_dir.list():
@@ -244,7 +282,7 @@ class EntCertUpdateAction(object):
             sn_list = [str(sn) for sn in sn_list]
             # NOTE: use injected IDENTITY, need to validate this
             # handles disconnected errors properly
-            reply = self.uep.getCertificates(self.identity.getConsumerId(),
+            reply = self.uep.getCertificates(self.identity.uuid,
                                               serials=sn_list)
             for cert in reply:
                 result.append(cert)
@@ -260,7 +298,7 @@ class EntCertUpdateAction(object):
             try:
                 cert.delete()
                 self.report.rogue.append(cert)
-            except OSError, er:
+            except OSError as er:
                 log.exception(er)
                 log.warn("Failed to delete cert")
 
@@ -268,9 +306,9 @@ class EntCertUpdateAction(object):
         # entitlement directory before we go to delete expired certs.
         rogue_count = len(self.report.rogue)
         if rogue_count > 0:
-            print gettext.ngettext("%s local certificate has been deleted.",
-                                   "%s local certificates have been deleted.",
-                                   rogue_count) % rogue_count
+            print(ungettext("%s local certificate has been deleted.",
+                            "%s local certificates have been deleted.",
+                            rogue_count) % rogue_count)
             self.ent_dir.refresh()
 
 
@@ -340,7 +378,7 @@ class EntitlementCertBundleInstaller(object):
             cert_bundle_writer.write(key, cert)
 
             self.report.added.append(cert)
-        except Exception, e:
+        except Exception as e:
             self.install_exception(bundle, e)
 
         self.post_install(bundle)

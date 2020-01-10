@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2012 Red Hat, Inc.
 #
@@ -12,9 +14,7 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
 import datetime
-import gettext
 import os
 import subprocess
 
@@ -23,7 +23,7 @@ from subscription_manager.ga import Gtk as ga_Gtk
 from subscription_manager.gui.utils import get_running_as_firstboot
 from subscription_manager.utils import get_client_versions, get_server_versions
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 LICENSE = _("\nThis software is licensed to you under the GNU General Public License, "
             "version 2 (GPLv2). There is NO WARRANTY for this software, express or "
@@ -35,7 +35,8 @@ LICENSE = _("\nThis software is licensed to you under the GNU General Public Lic
             "granted to use or replicate Red Hat trademarks that are incorporated "
             "in this software or its documentation.\n")
 
-UPDATE_FILE = '/var/run/rhsm/update'
+AUTO_ATTACH_UPDATE_FILE = '/var/run/rhsm/next_auto_attach_update'
+CERT_CHECK_UPDATE_FILE = '/var/run/rhsm/next_cert_check_update'
 
 prefix = os.path.dirname(__file__)
 
@@ -57,23 +58,21 @@ class AboutDialog(object):
         self.dialog.set_authors(["The Subscription Manager Team"])
 
         next_update_label = ga_Gtk.Label()
-        python_rhsm_version_label = ga_Gtk.Label()
+        next_auto_attach_label = ga_Gtk.Label()
         sub_man_version_label = ga_Gtk.Label()
         backend_version_label = ga_Gtk.Label()
         context_box = self.dialog.vbox.get_children()[0]
+        context_box.pack_end(next_auto_attach_label, True, True, 0)
         context_box.pack_end(next_update_label, True, True, 0)
-        context_box.pack_end(python_rhsm_version_label, True, True, 0)
         context_box.pack_end(sub_man_version_label, True, True, 0)
         context_box.pack_end(backend_version_label, True, True, 0)
 
-        self._set_next_update(next_update_label)
+        self._set_next_update(next_update_label, next_auto_attach_label)
 
         # Set the component versions.
         server_versions = get_server_versions(self.backend.cp_provider.get_consumer_auth_cp())
         client_versions = get_client_versions()
 
-        python_rhsm_version_label.set_markup(_("<b>%s version:</b> %s") %
-                                        ("python-rhsm", client_versions['python-rhsm']))
         sub_man_version_label.set_markup(_("<b>%s version:</b> %s") %
                                         ("subscription manager", client_versions['subscription-manager']))
         backend_version_label.set_markup(_("<b>subscription management service version:</b> %s") %
@@ -89,22 +88,32 @@ class AboutDialog(object):
         if response == ga_Gtk.ResponseType.DELETE_EVENT or response == ga_Gtk.ResponseType.CANCEL:
             self.dialog.destroy()
 
-    def _set_next_update(self, next_update_label):
+    def _set_next_update(self, next_update_label, next_auto_attach_label):
         try:
             if self._rhsmcertd_on():
-                next_update = long(file(UPDATE_FILE).read())
+                next_update = int(file(CERT_CHECK_UPDATE_FILE).read())
+                next_auto_attach = int(file(AUTO_ATTACH_UPDATE_FILE).read())
             else:
                 next_update = None
+                next_auto_attach = None
         except Exception:
             next_update = None
+            next_auto_attach = None
 
         if next_update:
             update_time = datetime.datetime.fromtimestamp(next_update)
-            next_update_label.set_markup(_('<b>Next System Check-in:</b> %s') %
+            next_update_label.set_markup(_('<b>Next System Certificate Check:</b> %s') %
                 update_time.strftime("%c"))
             next_update_label.show()
         else:
             next_update_label.hide()
+        if next_auto_attach:
+            next_auto_attach = datetime.datetime.fromtimestamp(next_auto_attach)
+            next_auto_attach_label.set_markup(_('<b>Next System Auto Attach:</b> %s') %
+                next_auto_attach.strftime("%c"))
+            next_auto_attach_label.show()
+        else:
+            next_auto_attach_label.hide()
 
     def _rhsmcertd_on(self):
         fnull = open(os.devnull, "w")

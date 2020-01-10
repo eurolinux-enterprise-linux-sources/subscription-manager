@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2015 Red Hat, Inc.
 #
@@ -17,7 +19,7 @@ import os
 
 from subscription_manager import injection as inj
 from subscription_manager.repolib import RepoActionInvoker
-from subscription_manager.hwprobe import ClassicCheck
+from rhsmlib.facts.hwprobe import ClassicCheck
 from subscription_manager.utils import chroot
 from subscription_manager.injectioninit import init_dep_injection
 from subscription_manager import logutil

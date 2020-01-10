@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 try:
     import unittest2 as unittest
 except ImportError:
@@ -6,6 +8,7 @@ except ImportError:
 import os
 import subprocess
 import sys
+import shutil
 import tempfile
 import threading
 import time
@@ -19,15 +22,11 @@ class TestLock(unittest.TestCase):
     lf_name = "lock.file"
 
     def setUp(self):
-        self.tmp_dir = self._tmp_dir()
         self.other_process = None
 
-    def _tmp_dir(self):
-        tmp_dir = tempfile.mkdtemp(suffix="lock", prefix="subman-unit-tests-")
-        return tmp_dir
-
     def _lock_path(self):
-        tmp_dir = self._tmp_dir()
+        tmp_dir = tempfile.mkdtemp(suffix="-lock", prefix="subman-unit-tests-")
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
         return os.path.join(tmp_dir, self.lf_name)
 
     # For thread.Timer()
@@ -75,8 +74,8 @@ class TestLock(unittest.TestCase):
     def close_lock_holder(self):
         try:
             self.other_process.communicate("whatever")
-        except Exception, e:
-            print e
+        except Exception as e:
+            print(e)
             # whatever, we closed it in the other thread
 
     def timeout_fail(self):
@@ -132,15 +131,15 @@ class TestLock(unittest.TestCase):
     def test_lock(self):
         lock_path = self._lock_path()
         lf = lock.Lock(lock_path)
-        self.assertEquals(lf.path, lock_path)
-        self.assertEquals(lf.depth, 0)
+        self.assertEqual(lf.path, lock_path)
+        self.assertEqual(lf.depth, 0)
 
     def test_lock_acquire(self):
         lock_path = self._lock_path()
         lf = lock.Lock(lock_path)
         res = lf.acquire()
         # given no args, acquire() blocks or returns None
-        self.assertEquals(res, None)
+        self.assertEqual(res, None)
 
     def test_lock_acquire_blocking_true(self):
         lock_path = self._lock_path()
@@ -214,6 +213,7 @@ def main(args):
     # exit on any stdin input
     for line in sys.stdin.readlines():
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[:]))

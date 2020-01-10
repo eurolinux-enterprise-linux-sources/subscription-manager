@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 - 2012 Red Hat, Inc.
 #
@@ -15,9 +17,7 @@
 
 import sys
 
-import gettext
 from subscription_manager.cli import AbstractCLICommand
-_ = gettext.gettext
 
 
 class RCTCliCommand(AbstractCLICommand):

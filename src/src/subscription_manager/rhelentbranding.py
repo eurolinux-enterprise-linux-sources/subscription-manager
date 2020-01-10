@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2013 Red Hat, Inc.
 #
@@ -79,7 +81,7 @@ class RHELBrandPicker(entbranding.BrandPicker):
         # same product, with the same branded name.
 
         branded_name_set = set([])
-        for cert, product in branded_certs:
+        for _cert, product in branded_certs:
             # uniq on product id and product name
             branded_name_set.add(product.brand_name)
 

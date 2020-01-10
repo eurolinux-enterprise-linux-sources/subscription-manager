@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -14,14 +16,10 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 
-from certlib import Locker, ActionReport
+from .certlib import Locker, ActionReport
 from subscription_manager import injection as inj
-
-_ = gettext.gettext
 
 log = logging.getLogger(__name__)
 
@@ -78,13 +76,13 @@ class FactsActionCommand(object):
     Returns a FactsActionReport.
     """
     def __init__(self):
-        self.cp_provider = inj.require(inj.CP_PROVIDER)
-        self.uep = self.cp_provider.get_consumer_auth_cp()
+        cp_provider = inj.require(inj.CP_PROVIDER)
+        self.uep = cp_provider.get_consumer_auth_cp()
         self.report = FactsActionReport()
         self.facts = inj.require(inj.FACTS)
+        self.facts_client = inj.require(inj.FACTS)
 
     def perform(self):
-
         # figure out the diff between latest facts and
         # report that as updates
 
@@ -94,7 +92,6 @@ class FactsActionCommand(object):
 
             consumer_identity = inj.require(inj.IDENTITY)
             if not consumer_identity.is_valid():
-                # FIXME: more info
                 return self.report
 
             # CacheManager.update_check calls self.has_changed,
@@ -103,6 +100,4 @@ class FactsActionCommand(object):
             log.info("Facts have been updated.")
         else:
             log.debug("Facts have not changed, skipping upload.")
-
-        # FIXME: can populate this with more info later
         return self.report

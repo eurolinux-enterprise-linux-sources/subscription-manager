@@ -1,4 +1,7 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -15,7 +18,13 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
+
+# hack to allow bytes/strings to be interpolated w/ unicode values (gettext gives us bytes)
+# Without this, for example, "Формат: %s\n" % u"foobar" will fail with UnicodeDecodeError
+# See http://stackoverflow.com/a/29832646/6124862 for more details
 import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
 
 enable_debug = False
 
@@ -31,6 +40,7 @@ def excepthook_base(exc_type, exc_value, exc_traceback):
 
     # something fundamental failed... how quiet should we be?
     sys.exit(0)
+
 
 sys.excepthook = excepthook_base
 
@@ -62,6 +72,7 @@ def excepthook_logging(exc_type, exc_value, exc_traceback):
 
     return excepthook_base(exc_type, exc_value, exc_traceback)
 
+
 sys.excepthook = excepthook_logging
 
 from subscription_manager.ga import GObject as ga_GObject
@@ -70,7 +81,7 @@ init_dep_injection()
 
 from subscription_manager.branding import get_branding
 from subscription_manager.injection import require, IDENTITY, CERT_SORTER, RHSM_ICON_CACHE
-from subscription_manager.hwprobe import ClassicCheck
+from rhsmlib.facts.hwprobe import ClassicCheck
 from subscription_manager.i18n_optparse import OptionParser, \
     WrappedIndentedHelpFormatter, USAGE
 from subscription_manager.cert_sorter import RHSM_VALID, \
@@ -78,8 +89,10 @@ from subscription_manager.cert_sorter import RHSM_VALID, \
         RHN_CLASSIC, RHSM_REGISTRATION_REQUIRED
 from subscription_manager.utils import print_error
 
-import rhsm.config
-CFG = rhsm.config.initConfig()
+from rhsm.config import initConfig
+from rhsmlib.services import config
+
+conf = config.Config(initConfig())
 
 enable_debug = False
 
@@ -87,7 +100,7 @@ enable_debug = False
 def debug(msg):
     if enable_debug:
         log.debug(msg)
-        print msg
+        print(msg)
 
 
 def in_warning_period(sorter):
@@ -200,7 +213,8 @@ class StatusChecker(dbus.service.Object):
         """
         log.debug("D-Bus interface com.redhat.SubscriptionManager.EntitlementStatus.check_status called")
         status = check_status(self.force_signal)
-        if (status != self.rhsm_icon_cache._read_cache()):
+        cached_status = self.rhsm_icon_cache.read_cache_only()
+        if cached_status and status != cached_status:
             debug("Validity status changed, fire signal in check_status")
             self.entitlement_status_changed(status)
         self.rhsm_icon_cache.data = status
@@ -212,13 +226,17 @@ class StatusChecker(dbus.service.Object):
             in_signature='i')
     @ensure_exit
     def update_status(self, status):
-        log.debug("D-Bus interface com.redhat.SubscriptionManager.EntitlementStatus.update_status called with status = %s" % status)
+        log.debug(
+            "D-Bus interface com.redhat.SubscriptionManager.EntitlementStatus.update_status called with status = %s"
+            % status
+        )
         pre_result = pre_check_status(self.force_signal)
         if pre_result is not None:
             status = pre_result
         # At comment time, update status is called every time we start the GUI. So we use
-        # a persistant cache to ensure we fire a signal only when the status changes.
-        if (status != self.rhsm_icon_cache._read_cache()):
+        # a persistent cache to ensure we fire a signal only when the status changes.
+        cached_status = self.rhsm_icon_cache.read_cache_only()
+        if cached_status and status != cached_status:
             debug("Validity status changed, fire signal")
             self.entitlement_status_changed(status)
         self.rhsm_icon_cache.data = status
@@ -253,7 +271,7 @@ def log_syslog(level, msg):
     syslog.syslog(level, msg)
     log.info("rhsmd: %s" % msg)
     if enable_debug:
-        print msg
+        print(msg)
 
 
 def main():

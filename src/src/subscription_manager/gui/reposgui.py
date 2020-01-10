@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2013 Red Hat, Inc.
 #
@@ -12,8 +14,6 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 
 from subscription_manager.ga import Gtk as ga_Gtk
@@ -34,7 +34,7 @@ from subscription_manager.gui.widgets import TextTreeViewColumn, CheckBoxColumn,
 from subscription_manager.gui.messageWindow import YesNoDialog
 from subscription_manager.overrides import Override
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 log = logging.getLogger(__name__)
 
@@ -374,7 +374,7 @@ class RepositoriesDialog(widgets.SubmanBaseWidget, HasSortableWidget):
             self.name_text.set_text(selection['name'])
             self.baseurl_text.set_text(selection['baseurl'])
 
-            for key, value in (selection['override_data'] or {}).items():
+            for key, value in list((selection['override_data'] or {}).items()):
                 if key not in ['gpgcheck', 'enabled']:
                     self.other_overrides.add_override(key, value)
 
@@ -483,7 +483,7 @@ class RepositoriesDialog(widgets.SubmanBaseWidget, HasSortableWidget):
         self.apply_button.set_sensitive(activate_apply_button)
 
     def _has_extra_overrides(self, override_data):
-        for key, value in (override_data or {}).items():
+        for key, value in list((override_data or {}).items()):
             if key not in ['gpgcheck', 'enabled']:
                 return True
         return False

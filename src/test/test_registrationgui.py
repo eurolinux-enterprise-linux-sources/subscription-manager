@@ -1,9 +1,10 @@
+from __future__ import print_function, division, absolute_import
 
 from mock import Mock, patch
 
-from fixture import SubManFixture
+from .fixture import SubManFixture
 
-from stubs import StubBackend, StubFacts
+from .stubs import StubBackend, StubFacts
 from subscription_manager.gui.registergui import RegisterWidget, RegisterInfo,  \
     CredentialsScreen, ActivationKeyScreen, ChooseServerScreen, AsyncBackend, \
     CREDENTIALS_PAGE, CHOOSE_SERVER_PAGE
@@ -13,6 +14,7 @@ from subscription_manager.ga import GObject as ga_GObject
 from subscription_manager.ga import Gtk as ga_Gtk
 
 import sys
+import six
 
 
 class RegisterWidgetTests(SubManFixture):
@@ -28,16 +30,13 @@ class RegisterWidgetTests(SubManFixture):
         self.facts = StubFacts(fact_dict=expected_facts)
 
         self.reg_info = RegisterInfo()
-        self.rs = RegisterWidget(backend=self.backend,
-                                 facts=self.facts,
-                                 reg_info=self.reg_info)
+        self.rs = RegisterWidget(backend=self.backend, reg_info=self.reg_info)
 
         self.rs._screens[CHOOSE_SERVER_PAGE] = Mock()
         self.rs._screens[CHOOSE_SERVER_PAGE].index = 0
         self.rs._screens[CHOOSE_SERVER_PAGE].screens_index = 0
         self.rs._screens[CHOOSE_SERVER_PAGE].button_label = "Dummy"
-        self.rs._screens[CHOOSE_SERVER_PAGE].apply.return_value = \
-                CREDENTIALS_PAGE
+        self.rs._screens[CHOOSE_SERVER_PAGE].apply.return_value = CREDENTIALS_PAGE
 
     def test_show(self):
         self.rs.initialize()
@@ -47,7 +46,7 @@ class RegisterWidgetTests(SubManFixture):
         # NOTE: these exceptions are not in the nost test context,
         #       so they don't actually fail nose
         try:
-            self.assertEquals(page_after, 0)
+            self.assertEqual(page_after, 0)
         except Exception:
             self.exc_infos.append(sys.exc_info())
             return
@@ -62,7 +61,7 @@ class RegisterWidgetTests(SubManFixture):
         # NOTE: these exceptions are not in the nost test context,
         #       so they don't actually fail nose
         try:
-            self.assertEquals(page_after, 0)
+            self.assertEqual(page_after, 0)
         except Exception:
             self.exc_infos.append(sys.exc_info())
             return
@@ -99,7 +98,7 @@ class RegisterWidgetTests(SubManFixture):
 
         # If we saw any exceptions, raise them now so we fail nosetests
         for exc_info in self.exc_infos:
-            raise exc_info[1], None, exc_info[2]
+            six.reraise(*exc_info)
 
         self.assertTrue(self.correct_page)
 
@@ -154,7 +153,6 @@ class CredentialsScreenTests(SubManFixture):
         stub_reg = StubReg()
         self.screen = CredentialsScreen(reg_info=stub_reg.reg_info,
                                         async_backend=stub_reg.async,
-                                        facts=stub_reg.facts,
                                         parent_window=stub_reg.parent_window)
 
     def test_clear_credentials_dialog(self):
@@ -165,10 +163,10 @@ class CredentialsScreenTests(SubManFixture):
         self.screen.skip_auto_bind.set_active(True)
         self.screen.consumer_name.set_text("CONSUMER")
         self.screen.clear()
-        self.assertEquals("", self.screen.account_login.get_text())
-        self.assertEquals("", self.screen.account_password.get_text())
+        self.assertEqual("", self.screen.account_login.get_text())
+        self.assertEqual("", self.screen.account_password.get_text())
         self.assertFalse(self.screen.skip_auto_bind.get_active())
-        self.assertEquals(default_consumer_name_value,
+        self.assertEqual(default_consumer_name_value,
                           self.screen.consumer_name.get_text())
 
 
@@ -178,14 +176,13 @@ class ActivationKeyScreenTests(SubManFixture):
         stub_reg = StubReg()
         self.screen = ActivationKeyScreen(reg_info=stub_reg.reg_info,
                                           async_backend=stub_reg.async,
-                                          facts=stub_reg.facts,
                                           parent_window=stub_reg.parent_window)
 
     def test_split_activation_keys(self):
         expected = ['hello', 'world', 'how', 'are', 'you']
         key_input = "hello, world,how  are , you"
         result = self.screen._split_activation_keys(key_input)
-        self.assertEquals(expected, result)
+        self.assertEqual(expected, result)
 
 
 class ChooseServerScreenTests(SubManFixture):
@@ -194,7 +191,6 @@ class ChooseServerScreenTests(SubManFixture):
         stub_reg = StubReg()
         self.screen = ChooseServerScreen(reg_info=stub_reg.reg_info,
                                          async_backend=stub_reg.async,
-                                         facts=stub_reg.facts,
                                          parent_window=stub_reg.parent_window)
 
     def test_activation_key_checkbox_sensitive(self):
@@ -230,26 +226,26 @@ class ChooseServerScreenTests(SubManFixture):
 
 class AsyncBackendTests(SubManFixture):
     def setUp(self):
+        super(AsyncBackendTests, self).setUp()
         self.backend = StubBackend()
         self.asyncBackend = AsyncBackend(self.backend)
-        super(AsyncBackendTests, self).setUp()
 
     def test_auto_system_complete(self):
         self.backend.cp_provider.get_consumer_auth_cp().getConsumer = \
-           Mock(return_value={"serviceLevel": "", "owner": {"key": "admin"}})
+            Mock(return_value={"serviceLevel": "", "owner": {"key": "admin"}})
         self.backend.cs.valid_products = ['RH001', 'RH002']
         self.backend.cs.installed_products = ['RH001', 'RH002']
         self.backend.cs.partial_stacks = []
         self.backend.cs.system_status = 'valid'
         self.backend.cp_provider.get_consumer_auth_cp().getServiceLevelList = Mock(return_value=[])
-        self.assertRaises(AllProductsCoveredException, self.asyncBackend._find_suitable_service_levels, '12345', {})
+        self.assertRaises(AllProductsCoveredException, self.asyncBackend._find_suitable_service_levels, '12345')
 
     def test_auto_system_partial(self):
         self.backend.cp_provider.get_consumer_auth_cp().getConsumer = \
-           Mock(return_value={"serviceLevel": "", "owner": {"key": "admin"}})
+            Mock(return_value={"serviceLevel": "", "owner": {"key": "admin"}})
         self.backend.cs.valid_products = ['RH001', 'RH002']
         self.backend.cs.installed_products = ['RH001', 'RH002']
         self.backend.cs.partial_stacks = []
         self.backend.cs.system_status = 'partial'
         self.backend.cp_provider.get_consumer_auth_cp().getServiceLevelList = Mock(return_value=[])
-        self.asyncBackend._find_suitable_service_levels('12345', {})
+        self.asyncBackend._find_suitable_service_levels('12345')

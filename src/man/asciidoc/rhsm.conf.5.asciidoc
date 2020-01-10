@@ -42,22 +42,33 @@ ssl_verify_depth::
 proxy_hostname::
   Set this to a non-blank value if *subscription-manager* should use a
   reverse proxy to access the subscription service. This sets the host
-  for the reverse proxy.
+  for the reverse proxy. Overrides hostname from *HTTP_PROXY* and
+  *HTTPS_PROXY* environment variables.
 
 proxy_port::
   Set this to a non-blank value if *subscription-manager* should use a
   reverse proxy to access the subscription service. This sets the port
-  for the reverse proxy.
+  for the reverse proxy. Overrides port from *HTTP_PROXY* and
+  *HTTPS_PROXY* environment variables.
 
 proxy_username::
   Set this to a non-blank value if *subscription-manager* should use an
   authenticated reverse proxy to access the subscription service. This
-  sets the username for the reverse proxy.
+  sets the username for the reverse proxy. Overrides username from
+  *HTTP_PROXY* and *HTTPS_PROXY* environment variables.
 
 proxy_password::
   Set this to a non-blank value if *subscription-manager* should use an
   authenticated reverse proxy to access the subscription service. This
-  sets the password for the reverse proxy.
+  sets the username for the reverse proxy. Overrides password from
+  *HTTP_PROXY* and *HTTPS_PROXY* environment variables.
+
+no_proxy::
+  Set this to a non-blank value if *subscription-manager* should not use
+  a proxy for specific hosts. Format is a comma-separated list of
+  hostname suffixes, optionally with port. '*' is a special value that
+  means don't use a proxy for any host. Overrides the *NO_PROXY*
+  environment variable.
 
 [rhsm] OPTIONS
 --------------
@@ -65,6 +76,11 @@ baseurl::
   This setting is the prefix for all content which is managed by the
   subscription service. This should be the hostname for the Red Hat CDN,
   the local Satellite or Capsule depending on your deployment.
+  Prefix depends on the service type. For the Red Hat CDN, the full
+  *baseurl* is *https://cdn.redhat.com* . For Satellite 6, the baseurl is
+  *https://HOSTNAME/pulp/repos* , so for a hostname of *sat6.example.com*
+  the full *baseurl* would be for example:
+  *https://sat6.example.com/pulp/repos* .
 
 ca_cert_dir::
   The location for the certificates which are used to communicate with the

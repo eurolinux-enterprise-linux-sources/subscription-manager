@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2013 Red Hat, Inc.
 #
@@ -71,7 +73,7 @@ class HealingUpdateAction(object):
     def perform(self):
         # inject
         identity = inj.require(inj.IDENTITY)
-        uuid = identity.getConsumerId()
+        uuid = identity.uuid
         consumer = self.uep.getConsumer(uuid)
 
         if 'autoheal' not in consumer or not consumer['autoheal']:
@@ -130,7 +132,7 @@ class HealingUpdateAction(object):
                     msg += " and tomorrow %s" % tomorrow
             log.info(msg)
 
-        except Exception, e:
+        except Exception as e:
             log.error("Error attempting to auto-heal:")
             log.exception(e)
             self.report._exceptions.append(e)

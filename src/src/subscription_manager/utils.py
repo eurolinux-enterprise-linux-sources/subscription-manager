@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2012 Red Hat, Inc.
 #
@@ -14,7 +16,6 @@
 #
 
 import collections
-import gettext
 import logging
 import os
 import pprint
@@ -24,13 +25,14 @@ import sys
 import signal
 import socket
 import syslog
-import urllib
+import uuid
 
+from six.moves import urllib
 from rhsm.https import ssl
 
 from subscription_manager.branding import get_branding
 from subscription_manager.certdirectory import Path
-from subscription_manager.hwprobe import ClassicCheck
+from rhsmlib.facts.hwprobe import ClassicCheck
 from subscription_manager import injection as inj
 
 # we moved quite a bit of code from this module to rhsm.
@@ -40,16 +42,13 @@ from rhsm.utils import parse_url
 from rhsm.connection import ProxyException
 
 import subscription_manager.version
-import rhsm.version
 from rhsm.connection import RestlibException, GoneException
 from rhsm.config import DEFAULT_PORT, DEFAULT_PREFIX, DEFAULT_HOSTNAME, \
     DEFAULT_CDN_HOSTNAME, DEFAULT_CDN_PORT, DEFAULT_CDN_PREFIX
 
+from subscription_manager.i18n import ugettext as _
+
 log = logging.getLogger(__name__)
-
-_ = lambda x: gettext.ldgettext("rhsm", x)
-
-gettext.textdomain("rhsm")
 
 
 class DefaultDict(collections.defaultdict):
@@ -67,9 +66,9 @@ def parse_server_info(local_server_entry, config=None):
     port = ''
     prefix = ''
     if config is not None:
-        hostname = config.get("server", "hostname")
-        port = config.get("server", "port")
-        prefix = config.get("server", "prefix")
+        hostname = config["server"]["hostname"]
+        port = config["server"]["port"]
+        prefix = config["server"]["prefix"]
     return parse_url(local_server_entry,
                       hostname or DEFAULT_HOSTNAME,
                       port or DEFAULT_PORT,
@@ -121,7 +120,7 @@ def url_base_join(base, url):
             base = base + '/'
         if (url and (url.startswith('/'))):
             url = url.lstrip('/')
-        return urllib.basejoin(base, url)
+        return urllib.parse.urljoin(base, url)
 
 
 class MissingCaCertException(Exception):
@@ -141,7 +140,7 @@ def is_valid_server_info(conn):
     try:
         conn.ping()
         return True
-    except RestlibException, e:
+    except RestlibException as e:
         # If we're getting Unauthorized that's a good indication this is a
         # valid subscription service:
         if e.code == 401:
@@ -155,7 +154,7 @@ def is_valid_server_info(conn):
         raise MissingCaCertException(e)
     except ProxyException:
         raise
-    except Exception, e:
+    except Exception as e:
         log.exception(e)
         return False
 
@@ -215,20 +214,17 @@ def get_terminal_width():
 
 def get_client_versions():
     # It's possible (though unlikely, and kind of broken) to have more
-    # than one version of python-rhsm/subscription-manager installed.
+    # than one version of subscription-manager installed.
     # This will return whatever version we are using.
     sm_version = _("Unknown")
-    pr_version = _("Unknown")
 
     try:
-        pr_version = rhsm.version.rpm_version
         sm_version = subscription_manager.version.rpm_version
-    except Exception, e:
+    except Exception as e:
         log.debug("Client Versions: Unable to check client versions")
         log.exception(e)
 
-    return {"subscription-manager": sm_version,
-            "python-rhsm": pr_version}
+    return {"subscription-manager": sm_version}
 
 
 def get_server_versions(cp, exception_on_timeout=False):
@@ -255,7 +251,7 @@ def get_server_versions(cp, exception_on_timeout=False):
                 cp_version = '-'.join([status.get('version', _("Unknown")),
                                        status.get('release', _("Unknown"))])
                 rules_version = status.get('rulesVersion', _("Unknown"))
-        except socket.timeout, e:
+        except socket.timeout as e:
             log.error("Timeout error while checking server version")
             log.exception(e)
             # for cli, we can assume if we get a timeout here, the rest
@@ -265,12 +261,12 @@ def get_server_versions(cp, exception_on_timeout=False):
                 log.error("Timeout error while checking server version")
                 raise
             # otherwise, ignore the timeout exception
-        except Exception, e:
+        except Exception as e:
             if isinstance(e, GoneException):
                 log.info("Server Versions: Error: consumer has been deleted, unable to check server version")
             else:
                 # a more useful error would be handy here
-                log.error(("Error while checking server version: %s") % e)
+                log.error("Error while checking server version: %s" % e)
 
             log.exception(e)
             cp_version = _("Unknown")
@@ -377,12 +373,12 @@ class ProductCertificateFilter(CertificateFilter):
             '?': '.',
         }
 
-        expression = ur"""
+        expression = u"""
             ((?:                # A captured, non-capture group :)
-                [^*?\\]*        # Character literals and other uninteresting junk (greedy)
-                (?:\\.?)*       # Anything escaped with a backslash, or just a trailing backslash
+                [^*?\\\\]*        # Character literals and other uninteresting junk (greedy)
+                (?:\\\\.?)*       # Anything escaped with a backslash, or just a trailing backslash
             )*)                 # Repeat the above sequence 0+ times, greedily
-            ([*?]|\Z)           # Any of our wildcards (* or ?) not preceded by a backslash OR end of input
+            ([*?]|\\Z)           # Any of our wildcards (* or ?) not preceded by a backslash OR end of input
         """
 
         if filter_string is not None:
@@ -495,13 +491,14 @@ class EntitlementCertificateFilter(ProductCertificateFilter):
 
 
 def print_error(message):
-    " Prints the specified message to stderr "
-
+    """
+    Prints the specified message to stderr
+    """
     sys.stderr.write(message)
     sys.stderr.write("\n")
 
 
-def unique_list_items(list, hash_function=lambda x: x):
+def unique_list_items(l, hash_function=lambda x: x):
     """
     Accepts a list of items.
     Returns a list of the unique items in the input.
@@ -509,7 +506,7 @@ def unique_list_items(list, hash_function=lambda x: x):
     """
     observed = set()
     unique_items = []
-    for item in list:
+    for item in l:
         item_key = hash_function(item)
         if item_key in observed:
             continue
@@ -517,3 +514,7 @@ def unique_list_items(list, hash_function=lambda x: x):
             unique_items.append(item)
             observed.add(item_key)
     return unique_items
+
+
+def generate_correlation_id():
+    return str(uuid.uuid4()).replace('-', '')  # FIXME cp should accept -

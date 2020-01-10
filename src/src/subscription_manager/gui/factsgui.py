@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -12,8 +14,6 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 
 from subscription_manager.ga import Gtk as ga_Gtk
@@ -21,8 +21,9 @@ from subscription_manager.ga import Gtk as ga_Gtk
 from subscription_manager.gui import widgets
 from subscription_manager.gui.utils import handle_gui_exception, linkify
 from subscription_manager import injection as inj
+from rhsm.connection import GoneException
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 log = logging.getLogger(__name__)
 
@@ -38,15 +39,16 @@ class SystemFactsDialog(widgets.SubmanBaseWidget):
                     'system_id_label', 'system_id_title']
     gui_file = "factsdialog"
 
-    def __init__(self, facts, update_callback=None):
-
+    def __init__(self, update_callback=None):
         super(SystemFactsDialog, self).__init__()
 
         #self.consumer = consumer
         self.update_callback = update_callback
         self.identity = inj.require(inj.IDENTITY)
         self.cp_provider = inj.require(inj.CP_PROVIDER)
-        self.facts = facts
+
+        self.facts = inj.require(inj.FACTS)
+
         self.connect_signals({
                 "on_system_facts_dialog_delete_event": self._hide_callback,
                 "on_close_button_clicked": self._hide_callback,
@@ -94,7 +96,6 @@ class SystemFactsDialog(widgets.SubmanBaseWidget):
             self.system_id_label.hide()
 
     def display_facts(self):
-        """Updates the list store with the current system facts."""
         self.facts_store.clear()
 
         last_update = self.facts.get_last_update()
@@ -103,13 +104,12 @@ class SystemFactsDialog(widgets.SubmanBaseWidget):
         else:
             self.last_update_label.set_text(_('No previous update'))
 
-        # make sure we get fresh facts, since entitlement validity status could         # change
+        # make sure we get fresh facts, since entitlement validity status could change
         system_facts_dict = self.facts.get_facts()
+        system_facts = sorted(system_facts_dict.items())
 
-        system_facts = system_facts_dict.items()
-
-        system_facts.sort()
         group = None
+
         for fact, value in system_facts:
             new_group = fact.split(".", 1)[0]
             if new_group != group:
@@ -133,8 +133,13 @@ class SystemFactsDialog(widgets.SubmanBaseWidget):
             self.owner_label.show()
             self.owner_title.show()
         # very broad exception
-        except Exception, e:
+        except Exception as e:
             log.error("Could not get owner name: %s" % e)
+            if isinstance(e, GoneException) and identity.uuid:
+                if e.deleted_id == identity.uuid:
+                    self.system_id_label.set_text(_('Error: Deleted uuid: %s') % identity.uuid)
+                else:
+                    self.system_id_label.set_text(_('Error: Wrong uuid: %s') % identity.uuid)
             self.owner_label.hide()
             self.owner_title.hide()
 
@@ -154,7 +159,7 @@ class SystemFactsDialog(widgets.SubmanBaseWidget):
             else:
                 self.environment_label.hide()
                 self.environment_title.hide()
-        except Exception, e:
+        except Exception as e:
             log.error("Could not get environment \nError: %s" % e)
             self.environment_label.hide()
             self.environment_title.hide()
@@ -168,7 +173,7 @@ class SystemFactsDialog(widgets.SubmanBaseWidget):
             self.facts.update_check(self.cp_provider.get_consumer_auth_cp(), identity.uuid, force=True)
             if self.update_callback:
                 self.update_callback()
-        except Exception, e:
+        except Exception as e:
             log.error("Could not update system facts \nError: %s" % e)
             handle_gui_exception(e, linkify(str(e)), self.system_facts_dialog)
 

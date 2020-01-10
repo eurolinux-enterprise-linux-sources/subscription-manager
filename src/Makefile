@@ -13,17 +13,20 @@
 #   just the fastest or easiest way.
 
 SHELL := /bin/bash
-PREFIX ?=
+PYTHON := python
+PREFIX ?= /
 SYSCONF ?= etc
 INSTALL_DIR = usr/share
-
-PYTHON_SITELIB ?= usr/lib/python2.7/site-packages
-# Note the underscore used instead of a hyphen
-PYTHON_INST_DIR = $(PREFIX)/$(PYTHON_SITELIB)/subscription_manager
 
 OS = $(shell lsb_release -i | awk '{ print $$3 }' | awk -F. '{ print $$1}')
 OS_VERSION = $(shell lsb_release -r | awk '{ print $$2 }' | awk -F. '{ print $$1}')
 OS_DIST ?= $(shell rpm --eval='%dist')
+
+PYTHON_VER ?= $(shell $(PYTHON) -c 'import sys; print("python%s.%s" % sys.version_info[:2])')
+
+PYTHON_SITELIB ?= usr/lib/$(PYTHON_VER)/site-packages
+# Note the underscore used instead of a hyphen
+PYTHON_INST_DIR = $(PREFIX)/$(PYTHON_SITELIB)/subscription_manager
 
 # Where various bits of code live in the git repo
 SRC_DIR := src/subscription_manager
@@ -41,11 +44,14 @@ RHSM_PLUGIN_DIR := $(PREFIX)/usr/share/rhsm-plugins/
 RHSM_PLUGIN_CONF_DIR := $(PREFIX)/etc/rhsm/pluginconf.d/
 ANACONDA_ADDON_INST_DIR := $(PREFIX)/usr/share/anaconda/addons
 INITIAL_SETUP_INST_DIR := $(ANACONDA_ADDON_INST_DIR)/$(ANACONDA_ADDON_NAME)
+POLKIT_ACTIONS_INST_DIR := $(PREFIX)/$(INSTALL_DIR)/polkit-1/actions
 LIBEXEC_DIR ?= $(shell rpm --eval='%_libexecdir')
 
 # If we skip install ostree plugin, unset by default
 # override from spec file for rhel6
 INSTALL_OSTREE_PLUGIN ?= true
+
+WITH_SYSTEMD ?= true
 
 # Default differences between el6 and el7
 ifeq ($(OS_DIST),.el6)
@@ -53,7 +59,7 @@ ifeq ($(OS_DIST),.el6)
    FIRSTBOOT_MODULES_DIR?=$(PREFIX)/usr/share/rhn/up2date_client/firstboot
    INSTALL_FIRSTBOOT?=true
    INSTALL_INITIAL_SETUP?=false
-else ifeq ($(OS),SUSE)
+else ifeq ($(findstring SUSE,$(OS)),SUSE)
    GTK_VERSION?=2
    FIRSTBOOT_MODULES_DIR?=$(PREFIX)/usr/share/rhn/up2date_client/firstboot
    INSTALL_FIRSTBOOT?=true
@@ -73,6 +79,8 @@ YUM_PLUGINS_SRC_DIR := src/plugins
 INSTALL_DNF_PLUGINS ?= false
 DNF_PLUGINS_SRC_DIR := src/plugins
 
+INSTALL_ZYPPER_PLUGINS ?= false
+
 # sets a version that is more or less latest tag plus commit sha
 VERSION ?= $(shell git describe | awk ' { sub(/subscription-manager-/,"")};1' )
 
@@ -80,8 +88,10 @@ VERSION ?= $(shell git describe | awk ' { sub(/subscription-manager-/,"")};1' )
 CFLAGS ?= -g -Wall
 LDFLAGS ?=
 
-RHSMCERTD_FLAGS = `pkg-config --cflags --libs glib-2.0`
-ICON_FLAGS=`pkg-config --cflags --libs "gtk+-$(GTK_VERSION).0 libnotify gconf-2.0 dbus-glib-1"`
+RHSMCERTD_CFLAGS = `pkg-config --cflags glib-2.0`
+RHSMCERTD_LDFLAGS = `pkg-config --libs glib-2.0`
+ICON_CFLAGS=`pkg-config --cflags "gtk+-$(GTK_VERSION).0 libnotify gconf-2.0 dbus-glib-1"`
+ICON_LDFLAGS=`pkg-config --libs "gtk+-$(GTK_VERSION).0 libnotify gconf-2.0 dbus-glib-1"`
 
 PYFILES := `find src/ test/ -name "*.py"`
 BIN_FILES := bin/subscription-manager bin/subscription-manager-gui \
@@ -95,8 +105,8 @@ STYLEFILES=$(PYFILES) $(BIN_FILES)
 build: rhsmcertd rhsm-icon
 # Install doesn't perform a build if it doesn't have too.  Best to clean out
 # any cruft so developers don't end up install old builds.
-	./setup.py clean --all
-	./setup.py build --quiet --gtk-version=$(GTK_VERSION) --rpm-version=$(VERSION)
+	$(PYTHON) ./setup.py clean --all
+	$(PYTHON) ./setup.py build --quiet --gtk-version=$(GTK_VERSION) --rpm-version=$(VERSION)
 
 # we never "remake" this makefile, so add a target so
 # we stop searching for implicit rules on how to remake it
@@ -107,29 +117,37 @@ clean:
 	rm -f *.pyc *.pyo *~ *.bak *.tar.gz
 	rm -f bin/rhsmcertd
 	rm -f bin/rhsm-icon
-	./setup.py clean --all
+	$(PYTHON) ./setup.py clean --all
+	rm -rf cover/ htmlcov/ docs/sphinx/_build/ build/ dist/
 
 rhsmcertd: $(DAEMONS_SRC_DIR)/rhsmcertd.c
-	$(CC) $(CFLAGS) $(LDFLAGS) $(RHSMCERTD_FLAGS) $(DAEMONS_SRC_DIR)/rhsmcertd.c -o bin/rhsmcertd
+	$(CC) $(CFLAGS) $(RHSMCERTD_CFLAGS) -DLIBEXECDIR='"$(LIBEXEC_DIR)"' $(DAEMONS_SRC_DIR)/rhsmcertd.c -o bin/rhsmcertd $(LDFLAGS) $(RHSMCERTD_LDFLAGS)
 
 rhsm-icon: $(RHSM_ICON_SRC_DIR)/rhsm_icon.c
-	$(CC) $(CFLAGS) $(LDFLAGS) $(ICON_FLAGS) $(RHSM_ICON_SRC_DIR)/rhsm_icon.c -o bin/rhsm-icon
+	$(CC) $(CFLAGS) $(ICON_CFLAGS) $(RHSM_ICON_SRC_DIR)/rhsm_icon.c -o bin/rhsm-icon $(LDFLAGS) $(ICON_LDFLAGS)
 
 .PHONY: check-syntax
 check-syntax:
 	$(CC) -fsyntax-only $(CFLAGS) $(LDFLAGS) $(ICON_FLAGS) `find -name '*.c'`
 
-.PHONY: dbus-service-install
-dbus-service-install:
+dbus-common-install:
 	install -d $(PREFIX)/etc/dbus-1/system.d
 	install -d $(PREFIX)/$(INSTALL_DIR)/dbus-1/system-services
 	install -d $(PREFIX)/$(LIBEXEC_DIR)
-	install -m 644 etc-conf/com.redhat.SubscriptionManager.conf \
-		$(PREFIX)/etc/dbus-1/system.d
-	install -m 644 etc-conf/com.redhat.SubscriptionManager.service \
-		$(PREFIX)/$(INSTALL_DIR)/dbus-1/system-services
-	install -m 744 $(DAEMONS_SRC_DIR)/rhsm_d.py \
-		$(PREFIX)/$(LIBEXEC_DIR)/rhsmd
+	install -d $(PREFIX)/etc/bash_completion.d
+
+dbus-rhsmd-service-install: dbus-common-install
+	install -m 644 etc-conf/dbus/system.d/com.redhat.SubscriptionManager.conf $(PREFIX)/etc/dbus-1/system.d
+	install -m 744 $(DAEMONS_SRC_DIR)/rhsm_d.py $(PREFIX)/$(LIBEXEC_DIR)/rhsmd
+
+dbus-facts-service-install: dbus-common-install
+	install -m 644 etc-conf/dbus/system.d/com.redhat.RHSM1.Facts.conf $(PREFIX)/etc/dbus-1/system.d
+
+dbus-main-service-install: dbus-common-install
+	install -m 644 etc-conf/dbus/system.d/com.redhat.RHSM1.conf $(PREFIX)/etc/dbus-1/system.d
+
+.PHONY: dbus-install
+dbus-install: dbus-facts-service-install dbus-rhsmd-service-install dbus-main-service-install
 
 .PHONY: install-conf
 install-conf:
@@ -150,6 +168,10 @@ install-conf:
 	install -m 644 etc-conf/rhsmcertd.completion.sh $(PREFIX)/etc/bash_completion.d/rhsmcertd
 	install -d $(PREFIX)/usr/share/appdata
 	install -m 644 etc-conf/subscription-manager-gui.appdata.xml $(PREFIX)/$(INSTALL_DIR)/appdata/subscription-manager-gui.appdata.xml
+	install -d $(POLKIT_ACTIONS_INST_DIR)
+	install -m 644 etc-conf/dbus/polkit/com.redhat.RHSM1.policy $(POLKIT_ACTIONS_INST_DIR)
+	install -m 644 etc-conf/dbus/polkit/com.redhat.RHSM1.Facts.policy $(POLKIT_ACTIONS_INST_DIR)
+	install -m 644 etc-conf/dbus/polkit/com.redhat.SubscriptionManager.policy $(POLKIT_ACTIONS_INST_DIR)
 
 .PHONY: install-plugins
 install-plugins:
@@ -164,6 +186,15 @@ install-plugins:
 		install -d $(PREFIX)/usr/lib/yum-plugins/ ; \
 		install -m 644 -p src/plugins/*.py $(PREFIX)/usr/lib/yum-plugins/ ; \
 		install -m 644 etc-conf/plugin/*.conf $(PREFIX)/etc/yum/pluginconf.d/ ; \
+	fi;
+
+	if [ "$(INSTALL_ZYPPER_PLUGINS)" = "true" ] ; then \
+	  echo "Installing zypper plugins" ; \
+		install -d $(PREFIX)/etc/rhsm/zypper.repos.d ; \
+		install -d $(PREFIX)/usr/lib/zypp/plugins/services ; \
+		install -d $(PREFIX)/usr/lib/zypp/plugins/commit ; \
+		install -m 755 -p src/zypper/services/* $(PREFIX)/usr/lib/zypp/plugins/services ; \
+		install -m 755 -p src/zypper/commit/* $(PREFIX)/usr/lib/zypp/plugins/commit ; \
 	fi;
 
 	if [ "$(INSTALL_DNF_PLUGINS)" = "true" ] ; then \
@@ -245,28 +276,27 @@ install-post-boot: install-firstboot install-initial-setup
 
 .PHONY: install-via-setup
 install-via-setup:
-	./setup.py install --root $(PREFIX) --gtk-version=$(GTK_VERSION) --rpm-version=$(VERSION)
+	$(PYTHON) ./setup.py install --root $(PREFIX) --gtk-version=$(GTK_VERSION) --rpm-version=$(VERSION) --with-systemd=$(WITH_SYSTEMD) --prefix=/usr
 
 .PHONY: install
 install: install-via-setup install-files
 
 .PHONY: install-files
-install-files: dbus-service-install install-conf install-plugins install-post-boot install-ga
+install-files: dbus-install install-conf install-plugins install-post-boot install-ga
 	install -d $(PREFIX)/var/log/rhsm
 	install -d $(PREFIX)/var/spool/rhsm/debug
 	install -d $(PREFIX)/var/run/rhsm
-	install -d -m 750 $(PREFIX)/var/lib/rhsm/{cache,facts,packages}
+	install -d -m 750 $(PREFIX)/var/lib/rhsm/{cache,facts,packages,repo_server_val}
 
 	# Set up rhsmcertd daemon. If installing on Fedora or RHEL 7+
 	# we prefer systemd over sysv as this is the new trend.
 	if [ $(OS) = Fedora ] ; then \
-		install -d $(SYSTEMD_INST_DIR); \
 		install -d $(PREFIX)/usr/lib/tmpfiles.d; \
 		install etc-conf/rhsmcertd.service $(SYSTEMD_INST_DIR); \
 		install etc-conf/subscription-manager.conf.tmpfiles \
 			$(PREFIX)/usr/lib/tmpfiles.d/subscription-manager.conf; \
-	elif [ $(OS) = SUSE ] ;then \
-		if [ $(OS_VERSION) -lt 12 ]; then \
+	elif [[ $(OS) == *"SUSE" ]]; then \
+		if [ $(OS_VERSION) -lt 1315 ]; then \
 			install etc-conf/rhsmcertd.init.d \
 				$(PREFIX)/etc/init.d/rhsmcertd; \
 		else \
@@ -281,7 +311,6 @@ install-files: dbus-service-install install-conf install-plugins install-post-bo
 			install etc-conf/rhsmcertd.init.d \
 				$(PREFIX)/etc/rc.d/init.d/rhsmcertd; \
 		else \
-			install -d $(SYSTEMD_INST_DIR); \
 			install -d $(PREFIX)/usr/lib/tmpfiles.d; \
 			install etc-conf/rhsmcertd.service $(SYSTEMD_INST_DIR); \
 			install etc-conf/subscription-manager.conf.tmpfiles \
@@ -292,7 +321,7 @@ install-files: dbus-service-install install-conf install-plugins install-post-bo
 	install -m 700 etc-conf/rhsmd.cron $(PREFIX)/etc/cron.daily/rhsmd
 
 	# SUSE Linux does not make use of consolehelper
-	if [ $(OS) != SUSE ] ;then \
+	if [[ ! $(OS) == *"SUSE" ]]; then \
 		ln -sf /usr/bin/consolehelper $(PREFIX)/usr/bin/subscription-manager-gui; \
 		ln -sf /usr/bin/consolehelper $(PREFIX)/usr/bin/subscription-manager; \
 		\
@@ -308,37 +337,48 @@ install-files: dbus-service-install install-conf install-plugins install-post-bo
 
 .PHONY: check
 check:
-	python setup.py -q nosetests -c playpen/noserc.dev
+	$(PYTHON) setup.py -q nosetests -c playpen/noserc.dev
+
+.PHONY: version_check
+version_check:
+# needs https://github.com/alikins/pyqver
+	-@TMPFILE=`mktemp` || exit 1; \
+	pyqver2.py -v -m 2.5  $(STYLEFILES) | tee $$TMPFILE; \
+	! test -s $$TMPFILE
 
 .PHONY: coverage
 coverage:
 ifdef ghprbPullId
 	# Pull the PR id from the Jenkins environment and use it as a seed so that each PR
 	# uses a consistant test ordering.
-	./setup.py -q nosetests --randomly-seed=$(ghprbPullId) -c playpen/noserc.ci
+	$(PYTHON) ./setup.py -q nosetests --randomly-seed=$(ghprbPullId) -c playpen/noserc.ci
 else
-	./setup.py -q nosetests -c playpen/noserc.ci
+	$(PYTHON) ./setup.py -q nosetests -c playpen/noserc.ci
 endif
+
+.PHONY: docs
+docs:
+	$(PYTHON) setup.py build_sphinx
 
 .PHONY: gettext
 gettext:
 	# Extract strings from our source files. any comments on the line above
 	# the string marked for translation beginning with "translators" will be
 	# included in the pot file.
-	./setup.py gettext
+	$(PYTHON) ./setup.py gettext
 
 .PHONY: update-po
 update-po:
-	./setup.py update_trans
+	$(PYTHON) ./setup.py update_trans
 
 .PHONY: uniq-po
 uniq-po:
-	./setup.py uniq_trans
+	$(PYTHON) ./setup.py uniq_trans
 
 # just run a check to make sure these compile
 .PHONY: polint
 polint:
-	./setup.py gettext --lint
+	$(PYTHON) ./setup.py gettext --lint
 
 .PHONY: just-strings
 just-strings:
@@ -370,22 +410,22 @@ gen-test-long-po:
 
 .PHONY: lint
 lint:
-	./setup.py lint
+	$(PYTHON) ./setup.py lint
 
 .PHONY: flake8
 flake8:
-	./setup.py flake8
+	$(PYTHON) ./setup.py flake8
 
 .PHONY: rpmlint
 rpmlint:
-	./setup.py lint_rpm
+	$(PYTHON) ./setup.py lint_rpm
 
 .PHONY: stylish
 stylish: lint
 
 .PHONY: install-pip-requirements
 install-pip-requirements:
-	@pip install -r test-requirements.txt
+	@pip install -I -r test-requirements.txt
 
 .PHONY: jenkins
 jenkins: install-pip-requirements build stylish coverage

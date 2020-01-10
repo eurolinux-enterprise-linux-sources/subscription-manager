@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2013 Red Hat, Inc.
 #
@@ -174,10 +176,8 @@ class BrandFile(object):
             brand_file.write(brand_info)
 
     def read(self):
-        brand_info = None
         with open(self.path, 'r') as brand_file:
-            brand_info = brand_file.read()
-        return brand_info
+            return brand_file.read()
 
     def __str__(self):
         return "<BrandFile path=%s>" % self.path

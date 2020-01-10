@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # GUI Module for standalone subscription-manager cli
 #
@@ -16,31 +18,29 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
 from subscription_manager.injection import require, IDENTITY, CERT_SORTER, CP_PROVIDER
 import subscription_manager.injection as inj
 
-import gettext
 import locale
 import logging
-import subprocess
-import urllib2
 import webbrowser
 import os
-import socket
 import threading
 import time
+import socket
 
 import rhsm.config as config
+
+from six.moves import urllib
 
 from subscription_manager.ga import Gtk as ga_Gtk
 from subscription_manager.ga import GLib as ga_GLib
 
 from subscription_manager.branding import get_branding
 from subscription_manager.entcertlib import EntCertActionInvoker
-from subscription_manager.facts import Facts
-from subscription_manager.hwprobe import ClassicCheck
-from subscription_manager import managerlib
+from subscription_manager.repolib import YumPluginManager
+from rhsmlib.facts.hwprobe import ClassicCheck
+from rhsmlib.services import unregister
 from subscription_manager.utils import get_client_versions, get_server_versions, parse_baseurl_info, restart_virt_who
 from subscription_manager.utils import print_error
 
@@ -60,23 +60,18 @@ from subscription_manager.gui.mysubstab import MySubscriptionsTab
 from subscription_manager.gui.preferences import PreferencesDialog
 from subscription_manager.gui.utils import handle_gui_exception, linkify
 from subscription_manager.gui.reposgui import RepositoriesDialog
+from subscription_manager.gui.networkConfig import reset_resolver
 from subscription_manager.overrides import Overrides
 from subscription_manager.cli import system_exit
 
-
-_ = gettext.gettext
-
-gettext.textdomain("rhsm")
-
-#Gtk.glade.bindtextdomain("rhsm")
-#Gtk.Window.set_default_icon_name("subscription-manager")
+from subscription_manager.i18n import ugettext as _
 
 log = logging.getLogger(__name__)
 
 cfg = config.initConfig()
 
-ONLINE_DOC_URL_TEMPLATE = "https://access.redhat.com/knowledge/docs/Red_Hat_Subscription_Management/?locale=%s"
-ONLINE_DOC_FALLBACK_URL = "https://access.redhat.com/knowledge/docs/Red_Hat_Subscription_Management/"
+ONLINE_DOC_URL_TEMPLATE = "https://access.redhat.com/documentation/%s/red_hat_subscription_management/"
+ONLINE_DOC_FALLBACK_URL = "https://access.redhat.com/documentation/en-us/red_hat_subscription_management/"
 
 # every GUI browser from https://docs.python.org/2/library/webbrowser.html with updates within last 2 years of writing
 PREFERRED_BROWSERS = [
@@ -176,34 +171,61 @@ class MainWindow(widgets.SubmanBaseWidget):
     def _exit(self, *args):
         system_exit(0)
 
-    def __init__(self, backend=None, facts=None,
+    def __init__(self, backend=None,
                  ent_dir=None, prod_dir=None,
                  auto_launch_registration=False):
         super(MainWindow, self).__init__()
 
-        if not self.test_proxy_connection():
-            print_error(_("Proxy connection failed, please check your settings."))
-            error_dialog = messageWindow.ContinueDialog(_("Proxy connection failed, please check your settings."),
-                                                        self._get_window())
+        rhsm_cfg = config.initConfig()
+        proxy_server = rhsm_cfg.get("server", "proxy_hostname")
+        proxy_port = int(rhsm_cfg.get("server", "proxy_port") or config.DEFAULT_PROXY_PORT)
+
+        def show_proxy_error_dialog(proxy_auth_required=False):
+            """
+            When proxy server is set in configuration and it is not
+            possible to connect to proxy server, then open dialog
+            for setting proxy server.
+            """
+            if proxy_auth_required:
+                proxy_user = rhsm_cfg.get("server", "proxy_user")
+                proxy_password = rhsm_cfg.get("server", "proxy_password")
+                if proxy_user or proxy_password:
+                    err_msg = _("Wrong proxy username or password, please check your settings.")
+                else:
+                    err_msg = _("Proxy authentication required, please check your settings.")
+            else:
+                err_msg = _("Proxy connection failed, please check your settings.")
+            print_error(err_msg)
+            error_dialog = messageWindow.ContinueDialog(err_msg, self._get_window())
             error_dialog.connect("response", self._on_proxy_error_dialog_response)
             self.network_config_dialog = networkConfig.NetworkConfigDialog()
+            # Sub-man gui will be terminated after saving settings and it is
+            # necessary to start it once again.
             self.network_config_dialog.saveButton.connect("clicked", self._exit)
             self.network_config_dialog.cancelButton.connect("clicked", self._exit)
-            return
+
         self.backend = backend or Backend()
+        cp = self.backend.cp_provider.get_consumer_auth_cp()
+
+        if proxy_server:
+            if not utils.test_proxy_reachability(proxy_server, proxy_port):
+                show_proxy_error_dialog()
+                return
+
+            try:
+                # Try to send to the simplest Rest API call to Candlepin server.
+                # This result will be used for getting version of Candlepin server.
+                # See self.log_server_version.
+                cp.supports_resource("status")
+            except socket.error as err:
+                # See https://tools.ietf.org/html/rfc7235#section-4.3
+                if "407 Proxy Authentication Required" in err.message:
+                    show_proxy_error_dialog(proxy_auth_required=True)
+                    return
+
         self.identity = require(IDENTITY)
-
-        self.facts = facts or Facts(self.backend.entitlement_dir,
-                self.backend.product_dir)
-        # We need to make sure facts are loaded immediately, some GUI operations
-        # are done in separate threads, and if facts try to load in another
-        # thread the virt guest detection code breaks due to hwprobe's use of
-        # signals.
-        self.facts.get_facts()
-
         log.debug("Client Versions: %s " % get_client_versions())
-        # Log the server version asynchronously
-        ga_GLib.idle_add(self.log_server_version, self.backend.cp_provider.get_consumer_auth_cp())
+        ga_GLib.idle_add(self.log_server_version, cp)
 
         settings = self.main_window.get_settings()
 
@@ -220,7 +242,7 @@ class MainWindow(widgets.SubmanBaseWidget):
         self.product_dir = prod_dir or self.backend.product_dir
         self.entitlement_dir = ent_dir or self.backend.entitlement_dir
 
-        self.system_facts_dialog = factsgui.SystemFactsDialog(self.facts, update_callback=self._handle_facts_updated)
+        self.system_facts_dialog = factsgui.SystemFactsDialog(update_callback=self._handle_facts_updated)
 
         self.preferences_dialog = PreferencesDialog(self.backend,
                                                     self._get_window())
@@ -239,18 +261,17 @@ class MainWindow(widgets.SubmanBaseWidget):
                 ga_Gtk.IconSize.MENU)
 
         self.installed_tab = InstalledProductsTab(self.backend,
-                                                  self.facts,
                                                   self.installed_tab_icon,
                                                   self,
                                                   ent_dir=self.entitlement_dir,
                                                   prod_dir=self.product_dir)
+
         self.my_subs_tab = MySubscriptionsTab(self.backend,
                                               self.main_window,
                                               ent_dir=self.entitlement_dir,
                                               prod_dir=self.product_dir)
 
         self.all_subs_tab = AllSubscriptionsTab(self.backend,
-                                                self.facts,
                                                 self.main_window)
 
         hbox = ga_Gtk.HBox(spacing=6)
@@ -301,6 +322,14 @@ class MainWindow(widgets.SubmanBaseWidget):
 
         if auto_launch_registration and not self.registered():
             self._register_item_clicked(None)
+
+        enabled_yum_plugins = YumPluginManager.enable_yum_plugins()
+        if len(enabled_yum_plugins) > 0:
+            messageWindow.InfoDialog(
+                YumPluginManager.warning_message(enabled_yum_plugins),
+                self._get_window(),
+                _("Warning - subscription-manager plugins were automatically enabled")
+            )
 
     def registered(self):
         return self.identity.is_valid()
@@ -406,7 +435,7 @@ class MainWindow(widgets.SubmanBaseWidget):
             cp = self.backend.cp_provider.get_consumer_auth_cp()
             # This can throw an exception if we cannot connect to the server, bz 1058374
             show_overrides = is_registered and cp.supports_resource('content_overrides')
-        except Exception, e:
+        except Exception as e:
             log.debug("Failed to check if the server supports resource content_overrides")
             log.debug(e)
 
@@ -432,7 +461,7 @@ class MainWindow(widgets.SubmanBaseWidget):
         return can_redeem
 
     def _register_item_clicked(self, widget):
-        registration_dialog = registergui.RegisterDialog(self.backend, self.facts)
+        registration_dialog = registergui.RegisterDialog(self.backend)
         registration_dialog.register_dialog.connect('destroy',
                                                     self._on_dialog_destroy,
                                                     widget)
@@ -453,7 +482,7 @@ class MainWindow(widgets.SubmanBaseWidget):
     def _preferences_item_clicked(self, widget):
         try:
             self.preferences_dialog.show()
-        except Exception, e:
+        except Exception as e:
             handle_gui_exception(e, _("Error in preferences dialog."
                                       "Please see /var/log/rhsm/rhsm.log for more information."),
                                  self._get_window())
@@ -461,7 +490,7 @@ class MainWindow(widgets.SubmanBaseWidget):
     def _repos_item_clicked(self, widget):
         try:
             self.repos_dialog.show()
-        except Exception, e:
+        except Exception as e:
             handle_gui_exception(e, _("Error in repos dialog. "
                                       "Please see /var/log/rhsm/rhsm.log for more information."),
                                  self._get_window())
@@ -475,8 +504,9 @@ class MainWindow(widgets.SubmanBaseWidget):
 
     def _perform_unregister(self):
         try:
-            managerlib.unregister(self.backend.cp_provider.get_consumer_auth_cp(), self.identity.uuid)
-        except Exception, e:
+            reset_resolver()
+            unregister.UnregisterService(self.backend.cp_provider.get_consumer_auth_cp()).unregister()
+        except Exception as e:
             log.error("Error unregistering system with entitlement platform.")
             handle_gui_exception(e, _("<b>Errors were encountered during unregister.</b>") +
                                       "\n%s\n" +
@@ -513,7 +543,7 @@ class MainWindow(widgets.SubmanBaseWidget):
         self.import_sub_dialog.show()
 
     def _update_certificates_button_clicked(self, widget):
-        autobind_wizard = registergui.AutobindWizardDialog(self.backend, self.facts)
+        autobind_wizard = registergui.AutobindWizardDialog(self.backend)
         autobind_wizard.register_dialog.connect('destroy',
                                                 self._on_dialog_destroy,
                                                 widget)
@@ -531,11 +561,9 @@ class MainWindow(widgets.SubmanBaseWidget):
 
     def _getting_started_item_clicked(self, widget):
         try:
-            # unfortunately, Gtk.show_uri does not work in RHEL 5
-            DEVNULL = open(os.devnull, 'w')
-            subprocess.call(["gnome-open", "ghelp:subscription-manager"],
-                            stderr=DEVNULL)
-        except Exception, e:
+            # try to open documentation in yelp
+            ga_Gtk.show_uri(None, 'ghelp:subscription-manager', time.time())
+        except Exception as e:
             # if we can't open it, it's probably because the user didn't
             # install the docs, or yelp. no need to bother them.
             log.warn("Unable to open help documentation: %s", e)
@@ -580,10 +608,13 @@ class MainWindow(widgets.SubmanBaseWidget):
 
     def _get_online_doc_url(self):
         lang, encoding = locale.getdefaultlocale()
-        url = ONLINE_DOC_URL_TEMPLATE % (lang.replace("_", "-"))
+        if lang is not None:
+            url = ONLINE_DOC_URL_TEMPLATE % (lang.replace("_", "-").lower())
+        else:
+            url = ONLINE_DOC_FALLBACK_URL
         try:
-            urllib2.urlopen(url)
-        except urllib2.URLError:
+            urllib.request.urlopen(url)
+        except urllib.error.URLError:
             # Use the default if there is no translation.
             url = ONLINE_DOC_FALLBACK_URL
         return url
@@ -592,21 +623,3 @@ class MainWindow(widgets.SubmanBaseWidget):
         # see bz 1323271 - update compliance on update of facts
         self.backend.cs.load()
         self.backend.cs.notify()
-
-    def test_proxy_connection(self):
-        result = None
-        if not cfg.get("server", "proxy_hostname"):
-            return True
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(10)
-            result = s.connect_ex((cfg.get("server", "proxy_hostname"), int(cfg.get("server", "proxy_port") or config.DEFAULT_PROXY_PORT)))
-        except Exception as e:
-            log.info("Attempted bad proxy: %s" % e)
-        finally:
-            s.close()
-        if result:
-            log.error("proxy connetion error: %s" % result)
-            return False
-        else:
-            return True

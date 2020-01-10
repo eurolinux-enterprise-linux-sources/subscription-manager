@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 # Copyright (c) 2013 Red Hat, Inc.
 #
 # This software is licensed to you under the GNU General Public License,
@@ -18,7 +20,7 @@ import subscription_manager.injection as inj
 from subscription_manager.cache import ProductStatusCache, \
     EntitlementStatusCache, OverrideStatusCache, ProfileManager, \
     InstalledProductsManager, PoolTypeCache, ReleaseStatusCache, \
-    RhsmIconCache
+    RhsmIconCache, ContentAccessCache, PoolStatusCache
 
 from subscription_manager.cert_sorter import CertSorter
 from subscription_manager.certdirectory import EntitlementDirectory
@@ -57,6 +59,7 @@ def init_dep_injection():
     inj.provide(inj.OVERRIDE_STATUS_CACHE, OverrideStatusCache, singleton=True)
     inj.provide(inj.RELEASE_STATUS_CACHE, ReleaseStatusCache,
                 singleton=False)
+    inj.provide(inj.CONTENT_ACCESS_CACHE, ContentAccessCache, singleton=True)
 
     inj.provide(inj.PROFILE_MANAGER, ProfileManager, singleton=True)
     inj.provide(inj.INSTALLED_PRODUCTS_MANAGER, InstalledProductsManager, singleton=True)
@@ -70,6 +73,7 @@ def init_dep_injection():
     # create a PluginManager we should probably raise an exception all the way up
     inj.provide(inj.PLUGIN_MANAGER, PluginManager, singleton=True)
 
+    inj.provide(inj.POOL_STATUS_CACHE, PoolStatusCache, singleton=True)
     inj.provide(inj.POOLTYPE_CACHE, PoolTypeCache, singleton=True)
     inj.provide(inj.ACTION_LOCK, ActionLock)
 

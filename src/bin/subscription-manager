@@ -1,4 +1,8 @@
-#!/usr/bin/python -S
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+from __future__ import print_function, division, absolute_import
+
 #
 # wrapper for subscription Manager commandline tool.
 #
@@ -21,9 +25,12 @@
 if __name__ != '__main__':
     raise ImportError("module cannot be imported")
 
+# hack to allow bytes/strings to be interpolated w/ unicode values (gettext gives us bytes)
+# Without this, for example, "Формат: %s\n" % u"foobar" will fail with UnicodeDecodeError
+# See http://stackoverflow.com/a/29832646/6124862 for more details
 import sys
+reload(sys)
 sys.setdefaultencoding('utf-8')
-import site
 import os
 
 # work around for https://bugzilla.redhat.com/show_bug.cgi?id=1402009
@@ -32,7 +39,7 @@ if 'TERM' in os.environ:
 
 
 def system_exit(code, msgs=None):
-    "Exit with a code and optional message(s). Saved a few lines of code."
+    """Exit with a code and optional message(s). Saved a few lines of code."""
 
     if msgs:
         if type(msgs) not in [type([]), type(())]:
@@ -57,6 +64,10 @@ try:
     from subscription_manager.injectioninit import init_dep_injection
     init_dep_injection()
 
+    import subscription_manager.injection as inj
+    # Set up DBus mainloop via DBUS_IFACE
+    inj.require(inj.DBUS_IFACE)
+
     from subscription_manager import managercli
     from subscription_manager.managercli import handle_exception
 
@@ -65,9 +76,9 @@ try:
 
 except KeyboardInterrupt:
     system_exit(0, "\nUser interrupted process.")
-except ImportError, e:
+except ImportError as err:
     system_exit(2, "Unable to find Subscription Manager module.\n"
-                  "Error: %s" % e)
+                   "Error: %s" % err)
 
 
 def main():
@@ -83,11 +94,11 @@ def main():
 if __name__ == '__main__':
     try:
         sys.exit(abs(main() or 0))
-    except SystemExit, e:
-        #this is a non-exceptional exception thrown by Python 2.4, just
-        #re-raise, bypassing handle_exception
-        raise e
+    except SystemExit as err:
+        # This is a non-exceptional exception thrown by Python 2.4, just
+        # re-raise, bypassing handle_exception
+        raise err
     except KeyboardInterrupt:
         system_exit(0, "\nUser interrupted process.")
-    except Exception, e:
+    except Exception as e:
         handle_exception("exception caught in subscription-manager", e)

@@ -1,4 +1,6 @@
 #!/usr/bin/python
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2013 Red Hat, Inc.
 #
@@ -13,12 +15,12 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-import gettext
 import glob
 import imp
 import inspect
 import logging
 import os
+import six
 
 from iniparse import SafeConfigParser
 from iniparse.compat import NoSectionError, NoOptionError
@@ -48,8 +50,6 @@ DEFAULT_CONF_PATH = "/etc/rhsm/pluginconf.d/"
 cfg = initConfig()
 
 log = logging.getLogger(__name__)
-
-_ = gettext.gettext
 
 
 class PluginException(Exception):
@@ -440,7 +440,7 @@ class PluginConfig(object):
 
         try:
             self.parser.read(self.conf_files)
-        except Exception, e:
+        except Exception as e:
             raise PluginConfigException(self.plugin_key, e)
 
     def _get_config_file_path(self):
@@ -455,7 +455,7 @@ class PluginConfig(object):
         """returns True if the plugin is enabled in it's config."""
         try:
             enabled = self.parser.getboolean('main', 'enabled')
-        except Exception, e:
+        except Exception as e:
             raise PluginConfigException(self.plugin_key, e)
 
         if not enabled:
@@ -485,7 +485,7 @@ class PluginHookRunner(object):
     def run(self):
         try:
             self.func(self.conduit)
-        except Exception, e:
+        except Exception as e:
             log.exception(e)
             raise
 
@@ -592,7 +592,7 @@ class BasePluginManager(object):
             try:
                 self.add_plugins_from_module(module,
                                             plugin_to_config_map=plugin_to_config_map)
-            except PluginException, e:
+            except PluginException as e:
                 log.exception(e)
                 log.error(e)
 
@@ -631,7 +631,7 @@ class BasePluginManager(object):
         # find all the plugin classes with valid configs first
         # then add them, so we skip the module if a class has a bad config
         found_plugin_classes = []
-        for name, clazz in sorted(plugin_classes):
+        for _name, clazz in sorted(plugin_classes):
 
             # We could have the module conf here, and check in that
             # instead of a per class config. We would not be able to
@@ -705,7 +705,7 @@ class BasePluginManager(object):
         # only look for func's that match slot's we have in our conduits
         class_is_used = False
 
-        for slot in self._slot_to_funcs.keys():
+        for slot in list(self._slot_to_funcs.keys()):
             func_name = slot + "_hook"
             if instance.all_slots or hasattr(instance, func_name):
                 # FIXME: document that all_hooks could result in calls to
@@ -713,7 +713,7 @@ class BasePluginManager(object):
                 # not have known about. aka, all_hooks is complicated
 
                 # verify the hook is a callable
-                if callable(getattr(instance, func_name)):
+                if six.callable(getattr(instance, func_name)):
                     self._slot_to_funcs[slot].append(getattr(instance, func_name))
                     class_is_used = True
                 else:
@@ -764,9 +764,10 @@ class BasePluginManager(object):
             raise SlotNameException(slot_name)
 
         for func in self._slot_to_funcs[slot_name]:
-            # can this use plugin_class.plugin_key?
-            plugin_key = ".".join([func.im_class.__module__, func.im_class.__name__])
-            log.debug("Running %s in %s" % (func.im_func.func_name, plugin_key))
+            func_module = inspect.getmodule(func).__name__
+            func_class = six.get_method_self(func).__class__.__name__
+            plugin_key = ".".join([func_module, func_class])
+            log.debug("Running %s in %s" % (six.get_method_function(func).__name__, plugin_key))
             # resolve slot_name to conduit
             # FIXME: handle cases where we don't have a conduit for a slot_name
             #   (should be able to handle this since we map those at the same time)
@@ -775,13 +776,13 @@ class BasePluginManager(object):
             try:
                 # create a Conduit
                 # FIXME: handle cases where we can't create a Conduit()
-                conduit_instance = conduit(func.im_class, **kwargs)
+                conduit_instance = conduit(six.get_method_self(func).__class__, **kwargs)
             # TypeError tends to mean we provided the wrong kwargs for this
             # conduit
             # if we get an Exception above, should we exit early, or
             # continue onto other hooks. A conduit could fail for
-            # something specific to func.im_class, but unlikely
-            except Exception, e:
+            # something specific to func.__class__, but unlikely
+            except Exception as e:
                 log.exception(e)
                 raise
 
@@ -824,7 +825,7 @@ class BasePluginManager(object):
         # first, which is weird. So this just sorts the slots by conduit name,
         # then by slot name
         conduit_to_slots = {}
-        for slot, conduit in self._slot_to_conduit.items():
+        for slot, conduit in list(self._slot_to_conduit.items()):
             # sigh, no defaultdict on 2.4
             if conduit not in conduit_to_slots:
                 conduit_to_slots[conduit] = []
@@ -872,12 +873,14 @@ class PluginManager(BasePluginManager):
     def _get_conduits(self):
         """get subscription-manager specific plugin conduits."""
         # we should be able to collect this from the sub classes of BaseConduit
-        return [BaseConduit, ProductConduit, ProductUpdateConduit,
-                RegistrationConduit, PostRegistrationConduit,
-                FactsConduit, SubscriptionConduit,
-                UpdateContentConduit,
-                PostSubscriptionConduit,
-                AutoAttachConduit, PostAutoAttachConduit]
+        return [
+            BaseConduit, ProductConduit, ProductUpdateConduit,
+            RegistrationConduit, PostRegistrationConduit,
+            FactsConduit, SubscriptionConduit,
+            UpdateContentConduit,
+            PostSubscriptionConduit,
+            AutoAttachConduit, PostAutoAttachConduit,
+        ]
 
     def _get_modules(self):
         module_files = self._find_plugin_module_files(self.search_path)
@@ -910,7 +913,7 @@ class PluginManager(BasePluginManager):
         for module_file in module_files:
             try:
                 modules.append(self._load_plugin_module_file(module_file))
-            except PluginException, e:
+            except PluginException as e:
                 log.error(e)
 
         return modules
@@ -935,7 +938,7 @@ class PluginManager(BasePluginManager):
             finally:
                 fp.close()
         # we could catch BaseException too for system exit
-        except Exception, e:
+        except Exception as e:
             log.exception(e)
             raise PluginModuleImportException(module_file, module_name)
 

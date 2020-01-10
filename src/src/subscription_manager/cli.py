@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 - 2012 Red Hat, Inc.
 #
@@ -12,21 +14,37 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import os
 import sys
+import logging
 
 from subscription_manager.printing_utils import columnize, echo_columnize_callback
 from subscription_manager.i18n_optparse import OptionParser, WrappedIndentedHelpFormatter
 from subscription_manager.utils import print_error
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
+
+
+log = logging.getLogger(__name__)
 
 
 class InvalidCLIOptionError(Exception):
     def __init__(self, message):
         Exception.__init__(self, message)
+
+
+def flush_stdout_stderr():
+    """
+    Try to flush stdout and stderr, when it is not possible
+    due to blocking process, then print error message to log file.
+    :return: None
+    """
+    # Try to flush all outputs, see BZ: 1350402
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except IOError as io_err:
+        log.error("Error: Unable to print data to stdout/stderr output during exit process: %s" % io_err)
 
 
 class AbstractCLICommand(object):
@@ -49,16 +67,18 @@ class AbstractCLICommand(object):
         raise NotImplementedError("Commands must implement: main(self, args=None)")
 
     def _validate_options(self):
-        '''
+        """
         Validates the command's arguments.
         @raise InvalidCLIOptionError: Raised when arg validation fails.
-        '''
+        """
         # No argument validation by default.
         pass
 
     def _get_usage(self):
-        # usage format strips any leading 'usage' so
-        # do not iclude it
+        """
+        Usage format strips any leading 'usage' so
+        do not include it
+        """
         return _("%%prog %s [OPTIONS]") % self.name
 
     def _do_command(self):
@@ -69,7 +89,7 @@ class AbstractCLICommand(object):
 
 
 # taken wholseale from rho...
-class CLI:
+class CLI(object):
 
     def __init__(self, command_classes=None):
         command_classes = command_classes or []
@@ -90,14 +110,13 @@ class CLI:
         self._usage()
 
     def _usage(self):
-        print _("Usage: %s MODULE-NAME [MODULE-OPTIONS] [--help]") % os.path.basename(sys.argv[0])
-        print "\r"
-        items = self.cli_commands.items()
-        items.sort()
+        print(_("Usage: %s MODULE-NAME [MODULE-OPTIONS] [--help]") % os.path.basename(sys.argv[0]))
+        print("\r")
+        items = sorted(self.cli_commands.items())
         items_primary = []
         items_other = []
         for (name, cmd) in items:
-            if (cmd.primary):
+            if cmd.primary:
                 items_primary.append(("  " + name, cmd.shortdesc))
             else:
                 items_other.append(("  " + name, cmd.shortdesc))
@@ -108,8 +127,8 @@ class CLI:
         self._do_columnize(all_items)
 
     def _do_columnize(self, items_list):
-        modules, descriptions = zip(*items_list)
-        print columnize(modules, echo_columnize_callback, *descriptions) + '\n'
+        modules, descriptions = list(zip(*items_list))
+        print(columnize(modules, echo_columnize_callback, *descriptions) + '\n')
 
     def _find_best_match(self, args):
         """
@@ -147,6 +166,7 @@ class CLI:
         cmd = self._find_best_match(sys.argv)
         if len(sys.argv) < 2:
             self._default_command()
+            flush_stdout_stderr()
             sys.exit(0)
         if not cmd:
             self._usage()
@@ -154,16 +174,19 @@ class CLI:
             return_code = 1
             if (len(sys.argv) > 1) and (sys.argv[1] == "--help"):
                 return_code = 0
+            flush_stdout_stderr()
             sys.exit(return_code)
 
         try:
             return cmd.main()
-        except InvalidCLIOptionError, error:
-            print error
+        except InvalidCLIOptionError as error:
+            print(error)
 
 
 def system_exit(code, msgs=None):
-    "Exit with a code and optional message(s). Saved a few lines of code."
+    """
+    Exit with a code and optional message(s). Saved a few lines of code.
+    """
 
     if msgs:
         if type(msgs) not in [type([]), type(())]:
@@ -185,5 +208,8 @@ def system_exit(code, msgs=None):
                 print_error(msg.encode("utf8"))
             else:
                 print_error(msg)
+
+    # Try to flush all outputs, see BZ: 1350402
+    flush_stdout_stderr()
 
     sys.exit(code)

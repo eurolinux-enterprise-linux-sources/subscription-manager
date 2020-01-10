@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -15,33 +17,34 @@
 import os
 
 from contextlib import nested
-from mock import Mock, NonCallableMock, patch
+from mock import Mock, NonCallableMock, patch, MagicMock
 
-from stubs import StubUEP
+from .stubs import StubUEP
 
 from subscription_manager.managercli import RegisterCommand
 from subscription_manager import injection as inj
 from subscription_manager import cache
+from subscription_manager.identity import ConsumerIdentity
 
-from fixture import SubManFixture, Capture
+from .fixture import SubManFixture, Capture
+
+from rhsmlib.services.register import RegisterService
+from rhsmlib.services import exceptions
 
 
 class CliRegistrationTests(SubManFixture):
+    def setUp(self):
+        super(CliRegistrationTests, self).setUp()
+        register_patcher = patch('subscription_manager.managercli.register.RegisterService',
+            spec=RegisterService)
+        self.mock_register = register_patcher.start().return_value
+        self.mock_register.register.return_value = MagicMock(name="MockConsumer")
+        self.addCleanup(register_patcher.stop)
 
-    def stub_persist(self, consumer):
-        self.persisted_consumer = consumer
-        return self.persisted_consumer
-
-    def test_register_persists_consumer_cert(self):
-        with patch('rhsm.connection.UEPConnection', new_callable=StubUEP) as mock_uep:
-            self.stub_cp_provider.basic_auth_cp = mock_uep
-
-            cmd = RegisterCommand()
-            self._inject_mock_invalid_consumer()
-            cmd._persist_identity_cert = self.stub_persist
-
-            cmd.main(['register', '--username=testuser1', '--password=password'])
-            self.assertEqual('dummy-consumer-uuid', self.persisted_consumer["uuid"])
+        identity_patcher = patch('subscription_manager.managercli.identity.ConsumerIdentity',
+            spec=ConsumerIdentity)
+        self.mock_consumer_identity = identity_patcher.start().return_value
+        self.addCleanup(identity_patcher.stop)
 
     def _inject_ipm(self):
         mock_ipm = NonCallableMock(spec=cache.InstalledProductsManager)
@@ -49,70 +52,43 @@ class CliRegistrationTests(SubManFixture):
         inj.provide(inj.INSTALLED_PRODUCTS_MANAGER, mock_ipm)
         return mock_ipm
 
-    def test_installed_products_cache_written(self):
-        with patch('rhsm.connection.UEPConnection', new_callable=StubUEP) as mock_uep:
-            self.stub_cp_provider.basic_auth_cp = mock_uep
-
-            self._inject_mock_invalid_consumer()
-            cmd = RegisterCommand()
-            cmd._persist_identity_cert = self.stub_persist
-            self._inject_ipm()
-
-            cmd.main(['register', '--username=testuser1', '--password=password'])
-
-            # FIXME: test something here...
-            # self.assertTrue(mock_ipm_wc.call_count > 0)
-
     @patch('subscription_manager.managercli.EntCertActionInvoker')
     def test_activation_keys_updates_certs_and_repos(self, mock_entcertlib):
-        with patch('rhsm.connection.UEPConnection', new_callable=StubUEP) as mock_uep:
-            self.stub_cp_provider.basic_auth_cp = mock_uep
+        self.stub_cp_provider.basic_auth_cp = Mock('rhsm.connection.UEPConnection', new_callable=StubUEP)
+        self._inject_mock_invalid_consumer()
 
-            self._inject_mock_invalid_consumer()
-            cmd = RegisterCommand()
-            cmd._persist_identity_cert = self.stub_persist
-            mock_entcertlib_instance = mock_entcertlib.return_value
-            self._inject_ipm()
+        cmd = RegisterCommand()
+        mock_entcertlib = mock_entcertlib.return_value
+        self._inject_ipm()
 
-            cmd.main(['register', '--activationkey=test_key', '--org=test_org'])
-            self.assertTrue(mock_entcertlib_instance.update.called)
+        cmd.main(['register', '--activationkey=test_key', '--org=test_org'])
+        self.mock_register.register.assert_called_once()
+        mock_entcertlib.update.assert_called_once()
 
     @patch('subscription_manager.managercli.EntCertActionInvoker')
     def test_consumerid_updates_certs_and_repos(self, mock_entcertlib):
-        def get_consumer(self, *args, **kwargs):
-            pass
+        self.stub_cp_provider.basic_auth_cp = Mock('rhsm.connection.UEPConnection', new_callable=StubUEP)
+        self._inject_mock_invalid_consumer()
 
-        with patch('rhsm.connection.UEPConnection', new_callable=StubUEP) as mock_uep:
-            mock_uep.getConsumer = get_consumer
-            self.stub_cp_provider.basic_auth_cp = mock_uep
+        cmd = RegisterCommand()
+        mock_entcertlib = mock_entcertlib.return_value
+        self._inject_ipm()
 
-            self._inject_mock_invalid_consumer()
-            cmd = RegisterCommand()
-            cmd._persist_identity_cert = self.stub_persist
-            mock_entcertlib_instance = mock_entcertlib.return_value
-            mock_uep.getConsumer = Mock(return_value={'uuid': '123123', 'type': {'manifest': False}})
-            self._inject_ipm()
-
-            cmd.main(['register', '--consumerid=123456', '--username=testuser1', '--password=password', '--org=test_org'])
-            self.assertTrue(mock_entcertlib_instance.update.called)
-            # self.assertTrue(mock_ipm.write_cache.call_count > 0)
+        cmd.main(['register', '--consumerid=123456', '--username=testuser1', '--password=password', '--org=test_org'])
+        self.mock_register.register.assert_called_once_with(None, consumerid='123456')
+        mock_entcertlib.update.assert_called_once()
 
     def test_consumerid_with_distributor_id(self):
-        def get_consumer(self, *args, **kwargs):
-            pass
+        self.stub_cp_provider.basic_auth_cp = Mock('rhsm.connection.UEPConnection', new_callable=StubUEP)
 
-        with patch('rhsm.connection.UEPConnection', new_callable=StubUEP) as mock_uep:
-            mock_uep.getConsumer = get_consumer
-            self.stub_cp_provider.basic_auth_cp = mock_uep
+        self._inject_mock_invalid_consumer()
+        cmd = RegisterCommand()
+        self._inject_ipm()
+        self.mock_register.register.side_effect = exceptions.ServiceError()
 
-            self._inject_mock_invalid_consumer()
-            cmd = RegisterCommand()
-            mock_uep.getConsumer = Mock(return_value={'uuid': '123123', 'type': {'manifest': True}, 'idCert': {'key': ''}})
-            self._inject_ipm()
-
-            with nested(Capture(silent=True), self.assertRaises(SystemExit)) as e:
-                cmd.main(['register', '--consumerid=TaylorSwift', '--username=testuser1', '--password=password', '--org=test_org'])
-                self.assertEquals(e.code, os.EX_USAGE)
+        with nested(Capture(silent=True), self.assertRaises(SystemExit)) as e:
+            cmd.main(['register', '--consumerid=TaylorSwift', '--username=testuser1', '--password=password', '--org=test_org'])
+            self.assertEqual(e.code, os.EX_USAGE)
 
     def test_strip_username_and_password(self):
         username, password = RegisterCommand._get_username_and_password(" ", " ")
@@ -138,7 +114,7 @@ class CliRegistrationTests(SubManFixture):
             env_id = rc._get_environment_id(mock_uep, 'owner', None)
 
             expected = None
-            self.assertEquals(expected, env_id)
+            self.assertEqual(expected, env_id)
 
     def test_get_environment_id_one_available(self):
         def env_list(*args, **kwargs):
@@ -155,7 +131,7 @@ class CliRegistrationTests(SubManFixture):
             env_id = rc._get_environment_id(mock_uep, 'owner', None)
 
             expected = "1234"
-            self.assertEquals(expected, env_id)
+            self.assertEqual(expected, env_id)
 
     def test_get_environment_id_multi_available(self):
         def env_list(*args, **kwargs):
@@ -174,7 +150,7 @@ class CliRegistrationTests(SubManFixture):
             env_id = rc._get_environment_id(mock_uep, 'owner', None)
 
             expected = "5678"
-            self.assertEquals(expected, env_id)
+            self.assertEqual(expected, env_id)
 
     def test_get_environment_id_multi_available_bad_name(self):
         def env_list(*args, **kwargs):
@@ -193,3 +169,14 @@ class CliRegistrationTests(SubManFixture):
 
             with nested(Capture(silent=True), self.assertRaises(SystemExit)):
                 rc._get_environment_id(mock_uep, 'owner', None)
+
+    def test_deprecate_consumer_type(self):
+        with patch('rhsm.connection.UEPConnection', new_callable=StubUEP) as mock_uep:
+            self.stub_cp_provider.basic_auth_cp = mock_uep
+
+            cmd = RegisterCommand()
+            self._inject_mock_invalid_consumer()
+
+            with nested(Capture(silent=True), self.assertRaises(SystemExit)) as e:
+                cmd.main(['register', '--type=candlepin'])
+                self.assertEqual(e.code, os.EX_USAGE)

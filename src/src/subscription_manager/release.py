@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Subscription manager command line utility. This script is a modified version of
 # cp_client.py from candlepin scripts
@@ -16,11 +18,11 @@
 # in this software or its documentation.
 #
 
-import gettext
-import httplib
 import logging
 import socket
+import six
 
+import six.moves.http_client
 from rhsm.https import ssl
 
 import rhsm.config
@@ -28,12 +30,23 @@ import rhsm.config
 from subscription_manager import injection as inj
 from subscription_manager import listing
 from subscription_manager import rhelproduct
-
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 log = logging.getLogger(__name__)
 
 cfg = rhsm.config.initConfig()
+
+
+class MultipleReleaseProductsError(ValueError):
+    def __init__(self, certificates):
+        self.certificates = certificates
+        self.certificate_paths = ", ".join([certificate.path for certificate in certificates])
+        super(ValueError, self).__init__(("More than one release product certificate installed. Certificate paths: %s"
+                                          % self.certificate_paths))
+
+    def translated_message(self):
+        return (_("Error: More than one release product certificate installed. Certificate paths: %s")
+                % ", ".join([certificate.path for certificate in self.certificates]))
 
 
 class ContentConnectionProvider(object):
@@ -81,8 +94,9 @@ class CdnReleaseVersionProvider(object):
     def get_releases(self):
         # cdn base url
 
-        # find the rhel product
-        release_product = None
+        # Find the rhel products
+        release_products = []
+        certificates = set()
         installed_products = self.product_dir.get_installed_products()
         for product_hash in installed_products:
             product_cert = installed_products[product_hash]
@@ -90,13 +104,19 @@ class CdnReleaseVersionProvider(object):
             for product in products:
                 rhel_matcher = rhelproduct.RHELProductMatcher(product)
                 if rhel_matcher.is_rhel():
-                    release_product = product
+                    release_products.append(product)
+                    certificates.add(product_cert)
 
-        if release_product is None:
-            log.debug("No products with RHEL product tags found")
+        if len(release_products) == 0:
+            log.info("No products with RHEL product tags found")
             return []
+        elif len(release_products) > 1:
+            raise MultipleReleaseProductsError(certificates=certificates)
 
+        # Note: only release_products with one item can pass previous if-elif
+        release_product = release_products[0]
         entitlements = self.entitlement_dir.list_for_product(release_product.id)
+
         listings = []
         for entitlement in entitlements:
             contents = entitlement.content
@@ -124,7 +144,7 @@ class CdnReleaseVersionProvider(object):
             try:
                 data = self.content_connection.get_versions(listing_path)
             except (socket.error,
-                    httplib.HTTPException,
+                    six.moves.http_client.HTTPException,
                     ssl.SSLError) as e:
                 # content connection doesn't handle any exceptions
                 # and the code that invokes this doesn't either, so
@@ -159,8 +179,8 @@ class CdnReleaseVersionProvider(object):
 
     def _is_correct_rhel(self, product_tags, content_tags):
         # easy to pass a string instead of a list
-        assert not isinstance(product_tags, basestring)
-        assert not isinstance(content_tags, basestring)
+        assert not isinstance(product_tags, six.string_types)
+        assert not isinstance(content_tags, six.string_types)
 
         for product_tag in product_tags:
             # we are comparing the lists to see if they

@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 # Copyright (c) 2010 Red Hat, Inc.
 #
 # This software is licensed to you under the GNU General Public License,
@@ -38,6 +40,7 @@ class CPProvider(object):
     # Initialize with default connection info from the config file
     def __init__(self):
         self.set_connection_info()
+        self.correlation_id = None
 
     # Reread the config file and prefer arguments over config values
     # then recreate connections
@@ -50,8 +53,9 @@ class CPProvider(object):
                 proxy_hostname_arg=None,
                 proxy_port_arg=None,
                 proxy_user_arg=None,
-                proxy_password_arg=None):
-
+                proxy_password_arg=None,
+                no_proxy_arg=None,
+                restlib_class=connection.Restlib):
         self.cert_file = ConsumerIdentity.certpath()
         self.key_file = ConsumerIdentity.keypath()
 
@@ -64,6 +68,8 @@ class CPProvider(object):
         self.proxy_port = proxy_port_arg
         self.proxy_user = proxy_user_arg
         self.proxy_password = proxy_password_arg
+        self.no_proxy = no_proxy_arg
+        self.restlib_class = restlib_class
         self.clean()
 
     # Set username and password used for basic_auth without
@@ -78,6 +84,9 @@ class CPProvider(object):
         self.cdn_hostname = cdn_hostname
         self.cdn_port = cdn_port
         self.content_connection = None
+
+    def set_correlation_id(self, correlation_id):
+        self.correlation_id = correlation_id
 
     # Force connections to be re-initialized
     def clean(self):
@@ -95,7 +104,10 @@ class CPProvider(object):
                     proxy_port=self.proxy_port,
                     proxy_user=self.proxy_user,
                     proxy_password=self.proxy_password,
-                    cert_file=self.cert_file, key_file=self.key_file)
+                    cert_file=self.cert_file, key_file=self.key_file,
+                    correlation_id=self.correlation_id,
+                    no_proxy=self.no_proxy,
+                    restlib_class=self.restlib_class)
         return self.consumer_auth_cp
 
     def get_basic_auth_cp(self):
@@ -109,7 +121,10 @@ class CPProvider(object):
                     proxy_user=self.proxy_user,
                     proxy_password=self.proxy_password,
                     username=self.username,
-                    password=self.password)
+                    password=self.password,
+                    correlation_id=self.correlation_id,
+                    no_proxy=self.no_proxy,
+                    restlib_class=self.restlib_class)
         return self.basic_auth_cp
 
     def get_no_auth_cp(self):
@@ -121,7 +136,10 @@ class CPProvider(object):
                     proxy_hostname=self.proxy_hostname,
                     proxy_port=self.proxy_port,
                     proxy_user=self.proxy_user,
-                    proxy_password=self.proxy_password)
+                    proxy_password=self.proxy_password,
+                    correlation_id=self.correlation_id,
+                    no_proxy=self.no_proxy,
+                    restlib_class=self.restlib_class)
         return self.no_auth_cp
 
     def get_content_connection(self):
@@ -131,5 +149,6 @@ class CPProvider(object):
                                                                    proxy_hostname=self.proxy_hostname,
                                                                    proxy_port=self.proxy_port,
                                                                    proxy_user=self.proxy_user,
-                                                                   proxy_password=self.proxy_password)
+                                                                   proxy_password=self.proxy_password,
+                                                                   no_proxy=self.no_proxy)
         return self.content_connection

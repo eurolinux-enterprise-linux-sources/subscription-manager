@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2015 Red Hat, Inc.
 #
@@ -56,6 +58,7 @@ class ProductId(dnf.Plugin):
         except Exception as e:
             logger.error(str(e))
 
+
 log = logging.getLogger('rhsm-app.' + __name__)
 
 
@@ -95,7 +98,7 @@ class DnfProductManager(ProductManager):
                     # We have to look in all repos for productids, not just
                     # the ones we create, or anaconda doesn't install it.
                     self.meta_data_errors.append(repo.id)
-            except Exception, e:
+            except Exception as e:
                 log.warn("Error loading productid metadata for %s." % repo)
                 log.exception(e)
                 self.meta_data_errors.append(repo.id)
@@ -111,11 +114,17 @@ class DnfProductManager(ProductManager):
         """find yum repos that have packages installed"""
 
         # installed packages
-        installed_na = self.base.sack.query().installed().na_dict()
+        q_installed = self.base.sack.query().installed()
+        if hasattr(q_installed, "_na_dict"):
+            # dnf 2.0
+            installed_na = q_installed._na_dict()
+        else:
+            # dnf 1.0
+            installed_na = q_installed.na_dict()
 
         # available version of installed
         avail_pkgs = self.base.sack.query().available().filter(name=[
-            k[0] for k in installed_na.keys()])
+            k[0] for k in list(installed_na.keys())])
 
         active = set()
         for p in avail_pkgs:

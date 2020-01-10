@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -16,11 +18,11 @@
 #
 
 import os
-from yum.plugins import TYPE_CORE, TYPE_INTERACTIVE
+from yum.plugins import TYPE_CORE
 
 from subscription_manager import injection as inj
 from subscription_manager.repolib import RepoActionInvoker
-from subscription_manager.hwprobe import ClassicCheck
+from rhsmlib.facts.hwprobe import ClassicCheck
 from subscription_manager.certlib import Locker
 from subscription_manager.utils import chroot
 from subscription_manager.injectioninit import init_dep_injection
@@ -29,7 +31,7 @@ from rhsm import connection
 from rhsm import config
 
 requires_api_version = '2.5'
-plugin_type = (TYPE_CORE, TYPE_INTERACTIVE)
+plugin_type = (TYPE_CORE,)
 
 # TODO: translate strings
 
@@ -97,7 +99,7 @@ def update(conduit, cache_only):
     if identity.is_valid():
         try:
             connection.UEPConnection(cert_file=cert_file, key_file=key_file)
-        #FIXME: catchall exception
+        # FIXME: catchall exception
         except Exception:
             # log
             conduit.info(2, "Unable to connect to Subscription Management Service")
@@ -174,5 +176,5 @@ def postconfig_hook(conduit):
         update(conduit, cache_only)
         warnOrGiveUsageMessage(conduit)
         warnExpired(conduit)
-    except Exception, e:
+    except Exception as e:
         conduit.error(2, str(e))

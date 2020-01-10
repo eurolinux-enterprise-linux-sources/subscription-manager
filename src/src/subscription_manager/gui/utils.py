@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -14,10 +16,10 @@
 #
 
 import datetime
-import gettext
 import logging
 import re
 import threading
+import socket
 
 from subscription_manager.ga import GObject as ga_GObject
 from subscription_manager.ga import Gtk as ga_Gtk
@@ -39,8 +41,6 @@ EVEN_ROW_COLOR = '#eeeeee'
 # set if we are in firstboot, to disable linkify, see bz#814378
 FIRSTBOOT = False
 
-_ = lambda x: gettext.ldgettext("rhsm", x)
-
 
 def running_as_firstboot():
     global FIRSTBOOT
@@ -49,6 +49,30 @@ def running_as_firstboot():
 
 def get_running_as_firstboot():
     return FIRSTBOOT
+
+
+def test_proxy_reachability(proxy_server, proxy_port):
+    """
+    Function used for testing reachability of proxy server. Note: this
+    function does not test functionality of proxy server.
+    :return: True, when proxy is reachable. Otherwise it returns False.
+    """
+
+    result = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+        result = sock.connect_ex((proxy_server, proxy_port))
+    except socket.error as e:
+        log.info("Attempted bad proxy: %s" % e)
+    finally:
+        sock.close()
+
+    if result != 0:
+        log.error("Proxy connection error: %s" % result)
+        return False
+    else:
+        return True
 
 
 def handle_gui_exception(e, msg, parent, format_msg=True, log_msg=None):
@@ -63,6 +87,9 @@ def handle_gui_exception(e, msg, parent, format_msg=True, log_msg=None):
     format_msg = if true, string sub the exception error in the msg
     """
     if isinstance(e, tuple):
+        if not log_msg:
+            log_msg = str(e[1])
+
         log.error(log_msg, exc_info=e)
         # Get the class instance of the exception
         e = e[1]
@@ -309,7 +336,7 @@ class AsyncWidgetUpdater(object):
             result = backend_method(*args, **kwargs)
             if callback:
                 ga_GObject.idle_add(callback, result)
-        except Exception, e:
+        except Exception as e:
             message = exception_msg or str(e)
             ga_GObject.idle_add(handle_gui_exception, e, message, self.parent_window)
         finally:

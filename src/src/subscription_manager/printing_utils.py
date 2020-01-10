@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2014 Red Hat, Inc.
 #
@@ -12,18 +14,21 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import fnmatch
 import re
 import logging
+import six
 
-from yum.i18n import utf8_width
+try:
+    from yum.i18n import utf8_width
+except ImportError:
+    from kitchen.text.display import textual_width as utf8_width
+
 from subscription_manager.utils import get_terminal_width
 
-log = logging.getLogger(__name__)
+from subscription_manager.i18n import ugettext as _
 
-_ = gettext.gettext
+log = logging.getLogger(__name__)
 
 FONT_BOLD = '\033[1m'
 FONT_RED = '\033[31m'
@@ -59,7 +64,7 @@ def columnize(caption_list, callback, *args, **kwargs):
         fixed_caption = '\n'.join(lines)
         padded_list.append(fixed_caption)
 
-    lines = zip(padded_list, args)
+    lines = list(zip(padded_list, args))
     output = []
     for (caption, value) in lines:
         kwargs['caption'] = caption
@@ -87,7 +92,7 @@ def format_name(name, indent, max_length):
     it a columned effect.  Assumes the first line is already
     properly indented.
     """
-    if not name or not max_length or (max_length - indent) <= 2 or not isinstance(name, basestring):
+    if not name or not max_length or (max_length - indent) <= 2 or not isinstance(name, six.string_types):
         return name
     if not isinstance(name, unicode):
         name = name.decode("utf-8")
@@ -135,7 +140,7 @@ def format_name(name, indent, max_length):
     return '\n'.join(lines)
 
 
-def highlight_by_filter_string_columnize_callback(template_str, *args, **kwargs):
+def highlight_by_filter_string_columnize_cb(template_str, *args, **kwargs):
     """
     Takes a template string and arguments and highlights word matches
     when the value contains a match to the filter_string.This occurs
@@ -154,7 +159,7 @@ def highlight_by_filter_string_columnize_callback(template_str, *args, **kwargs)
     if is_atty and filter_string and caption in match_columns:
         try:
             p = re.compile(fnmatch.translate(filter_string), re.IGNORECASE)
-        except Exception, e:
+        except Exception as e:
             log.error("Cannot compile search regex '%s'. %s", filter_string, e)
 
     arglist = []
@@ -195,7 +200,7 @@ def echo_columnize_callback(template_str, *args, **kwargs):
 
 # from http://farmdev.com/talks/unicode/
 def to_unicode_or_bust(obj, encoding='utf-8'):
-    if isinstance(obj, basestring):
+    if isinstance(obj, six.string_types):
         if not isinstance(obj, unicode):
             obj = unicode(obj, encoding)
     return obj

@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # GUI Module for the Autobind Wizard
 #
@@ -14,11 +16,7 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
 import logging
-
-import gettext
-_ = gettext.gettext
 
 log = logging.getLogger(__name__)
 

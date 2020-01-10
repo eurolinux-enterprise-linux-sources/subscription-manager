@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 try:
     import unittest2 as unittest
 except ImportError:
@@ -7,8 +9,5 @@ from subscription_manager.i18n import configure_i18n
 
 
 class TestI18N(unittest.TestCase):
-    def test_configure_i18n_without_glade(self):
+    def test_configure_i18n(self):
         configure_i18n()
-
-    def test_configure_i18n_with_glade(self):
-        configure_i18n(with_glade=True)

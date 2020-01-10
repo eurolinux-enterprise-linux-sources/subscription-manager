@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2011 Red Hat, Inc.
 #
@@ -18,8 +20,6 @@ Classes here track various information last sent to the server, compare
 this with the current state, and perform an update on the server if
 necessary.
 """
-
-import gettext
 import logging
 import os
 import socket
@@ -32,13 +32,17 @@ from rhsm.profile import get_profile, RPMProfile
 import subscription_manager.injection as inj
 from subscription_manager.jsonwrapper import PoolWrapper
 from rhsm import ourjson as json
+from subscription_manager.isodate import parse_date
 
-_ = gettext.gettext
+from rhsmlib.services import config
+
+from subscription_manager.i18n import ugettext as _
+
 log = logging.getLogger(__name__)
 
 PACKAGES_RESOURCE = "packages"
 
-cfg = initConfig()
+conf = config.Config(initConfig())
 
 
 class CacheManager(object):
@@ -66,7 +70,7 @@ class CacheManager(object):
         """
         raise NotImplementedError
 
-    def _sync_with_server(self, uep, consumer_uuid):
+    def _sync_with_server(self, uep, consumer_uuid, *args, **kwargs):
         """
         Sync the latest data to/from the server.
         """
@@ -108,28 +112,39 @@ class CacheManager(object):
             f.close()
             if debug:
                 log.debug("Wrote cache: %s" % self.CACHE_FILE)
-        except IOError, e:
-            if debug:
-                log.error("Unable to write cache: %s" %
-                        self.CACHE_FILE)
-                log.exception(e)
+        except IOError as err:
+            log.error("Unable to write cache: %s" % self.CACHE_FILE)
+            log.exception(err)
 
     def _read_cache(self):
         """
         Load the last data we sent to the server.
         Returns none if no cache file exists.
         """
+
         try:
             f = open(self.CACHE_FILE)
             data = self._load_data(f)
             f.close()
             return data
-        except IOError:
+        except IOError as err:
             log.error("Unable to read cache: %s" % self.CACHE_FILE)
+            log.exception(err)
         except ValueError:
             # ignore json file parse errors, we are going to generate
             # a new as if it didn't exist
             pass
+
+    def read_cache_only(self):
+        """
+        Try to read only cached data. When cache does not exist,
+        then None is returned.
+        """
+        if self._cache_exists():
+            return self._read_cache()
+        else:
+            log.debug("Cache file %s does not exist" % self.CACHE_FILE)
+            return None
 
     def update_check(self, uep, consumer_uuid, force=False):
         """
@@ -160,9 +175,9 @@ class CacheManager(object):
                 # Return the number of 'updates' we did, assuming updating all
                 # packages at once is one update.
                 return 1
-            except connection.RestlibException, re:
+            except connection.RestlibException as re:
                 raise re
-            except Exception, e:
+            except Exception as e:
                 log.error("Error updating system data on the server")
                 log.exception(e)
                 raise Exception(_("Error updating system data on the server, see /var/log/rhsm/rhsm.log "
@@ -181,7 +196,7 @@ class StatusCache(CacheManager):
         self.server_status = None
         self.last_error = None
 
-    def load_status(self, uep, uuid):
+    def load_status(self, uep, uuid, on_date=None):
         """
         Load status from wherever is appropriate.
 
@@ -194,7 +209,7 @@ class StatusCache(CacheManager):
         Returns None if we cannot reach the server, or use the cache.
         """
         try:
-            self._sync_with_server(uep, uuid)
+            self._sync_with_server(uep, uuid, on_date)
             self.write_cache()
             self.last_error = False
             return self.server_status
@@ -203,28 +218,20 @@ class StatusCache(CacheManager):
             self.last_error = ex
             log.error("Consumer certificate is invalid")
             return None
-        except connection.RestlibException, ex:
-            # Indicates we may be talking to a very old candlepin server
-            # which does not have the necessary API call.
-            log.exception(ex)
-            self.last_error = ex
-            return None
-        except connection.AuthenticationException, ex:
+        except connection.AuthenticationException as ex:
             log.error("Could not authenticate with server, check registration status.")
             log.exception(ex)
             self.last_error = ex
             return None
-        except connection.ExpiredIdentityCertException, ex:
+        except connection.ExpiredIdentityCertException as ex:
             log.exception(ex)
             self.last_error = ex
             log.error("Bad identity, unable to connect to server")
             return None
-        except connection.GoneException:
-            raise
         # all of the abover are subclasses of ConnectionException that
         # get handled first
-        except (connection.ConnectionException,
-                socket.error), ex:
+        except (connection.ConnectionException, connection.RateLimitExceededException,
+                socket.error) as ex:
 
             log.error(ex)
             self.last_error = ex
@@ -234,6 +241,12 @@ class StatusCache(CacheManager):
 
             log.warn("Unable to reach server, using cached status.")
             return self._read_cache()
+        except connection.RestlibException as ex:
+            # Indicates we may be talking to a very old candlepin server
+            # which does not have the necessary API call.
+            log.exception(ex)
+            self.last_error = ex
+            return None
 
     def to_dict(self):
         return self.server_status
@@ -302,8 +315,8 @@ class EntitlementStatusCache(StatusCache):
     """
     CACHE_FILE = "/var/lib/rhsm/cache/entitlement_status.json"
 
-    def _sync_with_server(self, uep, uuid):
-        self.server_status = uep.getCompliance(uuid)
+    def _sync_with_server(self, uep, uuid, on_date=None, *args, **kwargs):
+        self.server_status = uep.getCompliance(uuid, on_date)
 
 
 class ProductStatusCache(StatusCache):
@@ -312,7 +325,7 @@ class ProductStatusCache(StatusCache):
     """
     CACHE_FILE = "/var/lib/rhsm/cache/product_status.json"
 
-    def _sync_with_server(self, uep, uuid):
+    def _sync_with_server(self, uep, uuid, *args, **kwargs):
         consumer_data = uep.getConsumer(uuid)
 
         if 'installedProducts' not in consumer_data:
@@ -327,7 +340,7 @@ class OverrideStatusCache(StatusCache):
     """
     CACHE_FILE = "/var/lib/rhsm/cache/content_overrides.json"
 
-    def _sync_with_server(self, uep, consumer_uuid):
+    def _sync_with_server(self, uep, consumer_uuid, *args, **kwargs):
         self.server_status = uep.getContentOverrides(consumer_uuid)
 
 
@@ -337,12 +350,12 @@ class ReleaseStatusCache(StatusCache):
     """
     CACHE_FILE = "/var/lib/rhsm/cache/releasever.json"
 
-    def _sync_with_server(self, uep, consumer_uuid):
+    def _sync_with_server(self, uep, consumer_uuid, *args, **kwargs):
         def get_release(uuid):
 
-            #raise connection.RemoteServerException(500, "GET", "/release")
-            return uep.getRelease(consumer_uuid)
-            #raise connection.RestlibException(500, "something broke")
+            # To mimic connection problems you can raise required exception:
+            # raise connection.RemoteServerException(500, "GET", "/release")
+            return uep.getRelease(uuid)
 
         self.server_status = get_release(consumer_uuid)
 
@@ -362,7 +375,7 @@ class ProfileManager(CacheManager):
         # Could be None, we'll read the system's current profile later once
         # we're sure we actually need the data.
         self._current_profile = current_profile
-        self._report_package_profile = cfg.get_int('rhsm', 'report_package_profile')
+        self._report_package_profile = conf['rhsm'].get_int('report_package_profile')
 
     # give tests a chance to use something other than RPMProfile
     def _get_profile(self, profile_type):
@@ -406,13 +419,13 @@ class ProfileManager(CacheManager):
 
     def has_changed(self):
         if not self._cache_exists():
-            log.debug("Cache does not exist")
+            log.debug("Cache file %s does not exist" % self.CACHE_FILE)
             return True
 
         cached_profile = self._read_cache()
         return not cached_profile == self.current_profile
 
-    def _sync_with_server(self, uep, consumer_uuid):
+    def _sync_with_server(self, uep, consumer_uuid, *args, **kwargs):
         uep.updatePackageProfile(consumer_uuid,
                 self.current_profile.collect())
 
@@ -454,7 +467,7 @@ class InstalledProductsManager(CacheManager):
 
     def has_changed(self):
         if not self._cache_exists():
-            log.debug("Cache does not exist")
+            log.debug("Cache file %s does not exist" % self.CACHE_FILE)
             return True
 
         cached = self._read_cache()
@@ -467,7 +480,7 @@ class InstalledProductsManager(CacheManager):
 
         self._setup_installed()
 
-        if len(products.keys()) != len(self.installed.keys()):
+        if len(list(products.keys())) != len(list(self.installed.keys())):
             return True
 
         if products != self.installed:
@@ -501,21 +514,35 @@ class InstalledProductsManager(CacheManager):
         consumer.
         """
         self._setup_installed()
-        final = [val for (key, val) in self.installed.items()]
+        final = [val for (key, val) in list(self.installed.items())]
         return final
 
-    def _sync_with_server(self, uep, consumer_uuid):
+    def _sync_with_server(self, uep, consumer_uuid, *args, **kwargs):
         uep.updateConsumer(consumer_uuid,
                 installed_products=self.format_for_server(),
                 content_tags=self.tags)
 
 
+class PoolStatusCache(StatusCache):
+    """
+    Manages the system cache of pools
+    """
+    CACHE_FILE = "/var/lib/rhsm/cache/pool_status.json"
+
+    def _sync_with_server(self, uep, uuid, *args, **kwargs):
+        self.server_status = uep.getEntitlementList(uuid)
+
+
 class PoolTypeCache(object):
+    """
+    Cache type of pool
+    """
 
     def __init__(self):
         self.identity = inj.require(inj.IDENTITY)
         self.cp_provider = inj.require(inj.CP_PROVIDER)
         self.ent_dir = inj.require(inj.ENT_DIR)
+        self.pool_cache = inj.require(inj.POOL_STATUS_CACHE)
         self.pooltype_map = {}
         self.update()
 
@@ -535,19 +562,15 @@ class PoolTypeCache(object):
     def _do_update(self):
         result = {}
         if self.identity.is_valid():
-            cp = self.cp_provider.get_consumer_auth_cp()
-            entitlement_list = []
-            try:
-                entitlement_list = cp.getEntitlementList(self.identity.uuid)
-            except Exception, e:
-                # In this case, return an empty map.  We just won't populate the field
-                log.debug('Problem attmepting to get entitlements from the server')
-                log.debug(e)
+            self.pool_cache.load_status(self.cp_provider.get_consumer_auth_cp(),
+                                        self.identity.uuid)
+            entitlement_list = self.pool_cache.server_status
 
-            for ent in entitlement_list:
-                pool = PoolWrapper(ent.get('pool', {}))
-                pool_type = pool.get_pool_type()
-                result[pool.get_id()] = pool_type
+            if entitlement_list is not None:
+                for ent in entitlement_list:
+                    pool = PoolWrapper(ent.get('pool', {}))
+                    pool_type = pool.get_pool_type()
+                    result[pool.get_id()] = pool_type
 
         self.pooltype_map.update(result)
 
@@ -560,12 +583,68 @@ class PoolTypeCache(object):
         self.pooltype_map = {}
 
 
+class ContentAccessCache(object):
+    CACHE_FILE = "/var/lib/rhsm/cache/content_access.json"
+
+    def __init__(self):
+        self.cp_provider = inj.require(inj.CP_PROVIDER)
+        self.identity = inj.require(inj.IDENTITY)
+
+    def _query_for_update(self, if_modified_since=None):
+        uep = self.cp_provider.get_consumer_auth_cp()
+        try:
+            response = uep.getAccessibleContent(self.identity.uuid, if_modified_since=if_modified_since)
+        except connection.RestlibException as err:
+            log.warning("Unable to query for content access updates: %s", err)
+            return None
+        if response is None or "contentListing" not in response:
+            return None
+        else:
+            self._update_cache(response)
+            return response
+
+    def exists(self):
+        return os.path.exists(self.CACHE_FILE)
+
+    def remove(self):
+        return os.remove(self.CACHE_FILE)
+
+    def check_for_update(self):
+        if self.exists():
+            data = json.loads(self.read())
+            last_update = parse_date(data["lastUpdate"])
+        else:
+            last_update = None
+        return self._query_for_update(if_modified_since=last_update)
+
+    @staticmethod
+    def update_cert(cert, data):
+        if data is None:
+            return
+        if data["contentListing"] is None or str(cert.serial) not in data["contentListing"]:
+            log.warning("Cert serial %s not contained in content listing; not updating it." % cert.serial)
+            return
+        with open(cert.path, "w") as output:
+            updated_cert = "".join(data["contentListing"][str(cert.serial)])
+            log.info("Updating certificate %s with new content" % cert.serial)
+            output.write(updated_cert)
+
+    def _update_cache(self, data):
+        log.debug("Updating content access cache")
+        with open(self.CACHE_FILE, "w") as cache:
+            cache.write(json.dumps(data))
+
+    def read(self):
+        with open(self.CACHE_FILE, "r") as cache:
+            return cache.read()
+
+
 class RhsmIconCache(CacheManager):
-    '''
+    """
     Cache to keep track of last status returned by the StatusCache.
     This cache is specifically used to ensure RHSM icon pops up only
     when the status changes.
-    '''
+    """
 
     CACHE_FILE = "/var/lib/rhsm/cache/rhsm_icon.json"
 
@@ -579,8 +658,9 @@ class RhsmIconCache(CacheManager):
         try:
             self.data = json.loads(open_file.read()) or {}
             return self.data
-        except IOError:
+        except IOError as err:
             log.error("Unable to read cache: %s" % self.CACHE_FILE)
+            log.exception(err)
         except ValueError:
             # ignore json file parse errors, we are going to generate
             # a new as if it didn't exist
@@ -588,11 +668,11 @@ class RhsmIconCache(CacheManager):
 
 
 class WrittenOverrideCache(CacheManager):
-    '''
+    """
     Cache to keep track of the overrides used last time the a redhat.repo
     was written.  Doesn't track server status, we've got another cache for
     that.
-    '''
+    """
 
     CACHE_FILE = "/var/lib/rhsm/cache/written_overrides.json"
 
@@ -606,8 +686,9 @@ class WrittenOverrideCache(CacheManager):
         try:
             self.overrides = json.loads(open_file.read()) or {}
             return self.overrides
-        except IOError:
+        except IOError as err:
             log.error("Unable to read cache: %s" % self.CACHE_FILE)
+            log.exception(err)
         except ValueError:
             # ignore json file parse errors, we are going to generate
             # a new as if it didn't exist

@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -14,8 +16,6 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 import os
 
@@ -23,11 +23,12 @@ from rhsm.certificate import Key, create_from_file
 from rhsm.config import initConfig
 from subscription_manager.injection import require, ENT_DIR
 
+from rhsmlib.services import config
+from rhsm.certificate2 import CONTENT_ACCESS_CERT_TYPE
+
 log = logging.getLogger(__name__)
 
-_ = gettext.gettext
-
-cfg = initConfig()
+conf = config.Config(initConfig())
 
 DEFAULT_PRODUCT_CERT_DIR = "/etc/pki/product-default"
 
@@ -59,7 +60,7 @@ class Directory(object):
 
     def listdirs(self):
         dirs = []
-        for p, fn in self.list_all():
+        for _p, fn in self.list_all():
             path = self.abspath(fn)
             if Path.isdir(path):
                 dirs.append(Directory(path))
@@ -114,7 +115,7 @@ class CertificateDirectory(Directory):
         if self._listing is not None:
             return self._listing
         listing = []
-        for p, fn in Directory.list(self):
+        for _p, fn in Directory.list(self):
             if not fn.endswith('.pem') or fn.endswith(self.KEY):
                 continue
             path = self.abspath(fn)
@@ -155,11 +156,11 @@ class CertificateDirectory(Directory):
                 if p.id == p_hash:
                     certs.add(c)
                     # Keep track of stacks that provide our product
-                    if (c.order and c.order.stacking_id):
+                    if c.order and c.order.stacking_id:
                         providing_stack_ids.add(c.order.stacking_id)
 
             # Keep track of stack ids in case we need them later.  avoids another loop
-            if (c.order and c.order.stacking_id):
+            if c.order and c.order.stacking_id:
                 if c.order.stacking_id not in stack_id_map:
                     stack_id_map[c.order.stacking_id] = set()
                 stack_id_map[c.order.stacking_id].add(c)
@@ -177,7 +178,7 @@ class CertificateDirectory(Directory):
                     return c
         return None
 
-    #Set up an alias for backwards compatibility
+    # Set up an alias for backwards compatibility
     findByProduct = find_by_product
 
 
@@ -213,13 +214,13 @@ class ProductCertificateDirectory(CertificateDirectory):
         for product_cert in prod_certs:
             product = product_cert.products[0]
             installed_products[product.id] = product_cert
-        log.debug("Installed product IDs: %s" % installed_products.keys())
+        log.debug("Installed product IDs: %s" % list(installed_products.keys()))
         return installed_products
 
 
 class ProductDirectory(ProductCertificateDirectory):
     def __init__(self, path=None, default_path=None):
-        installed_prod_path = path or cfg.get('rhsm', 'productCertDir')
+        installed_prod_path = path or conf['rhsm']['productCertDir']
         default_prod_path = default_path or DEFAULT_PRODUCT_CERT_DIR
         self.installed_prod_dir = ProductCertificateDirectory(path=installed_prod_path)
         self.default_prod_dir = ProductCertificateDirectory(path=default_prod_path)
@@ -231,7 +232,7 @@ class ProductDirectory(ProductCertificateDirectory):
         # Product IDs in installed_prod dir.
         pids = set([cert.products[0].id for cert in installed_prod_list])
         # Everything from /etc/pki/product, only use product-default for pids that don't already exist
-        return installed_prod_list + filter(lambda l: l.products[0].id not in pids, default_prod_list)
+        return installed_prod_list + [l for l in default_prod_list if l.products[0].id not in pids]
 
     def refresh(self):
         self.installed_prod_dir.refresh()
@@ -252,7 +253,7 @@ class ProductDirectory(ProductCertificateDirectory):
 
 class EntitlementDirectory(CertificateDirectory):
 
-    PATH = cfg.get('rhsm', 'entitlementCertDir')
+    PATH = conf['rhsm']['entitlementCertDir']
     PRODUCT = 'product'
 
     @classmethod
@@ -289,18 +290,17 @@ class EntitlementDirectory(CertificateDirectory):
         return True
 
     def list_valid(self):
-        valid = []
-        for c in self.list():
+        return [x for x in self.list() if self._check_key(x) and x.is_valid()]
 
-            # If something is amiss with the key for this certificate, consider
-            # it invalid:
-            if not self._check_key(c):
-                continue
+    def list_valid_with_content_access(self):
+        return [x for x in self.list_with_content_access() if self._check_key(x) and x.is_valid()]
 
-            if c.is_valid():
-                valid.append(c)
+    def list(self):
+        certs = super(EntitlementDirectory, self).list()
+        return [cert for cert in certs if cert.entitlement_type != CONTENT_ACCESS_CERT_TYPE]
 
-        return valid
+    def list_with_content_access(self):
+        return super(EntitlementDirectory, self).list()
 
     def list_for_product(self, product_id):
         """
@@ -332,7 +332,7 @@ class EntitlementDirectory(CertificateDirectory):
         return pool_id_to_serials
 
 
-class Path:
+class Path(object):
 
     # Used during Anaconda install by the yum pidplugin to ensure we operate
     # beneath /mnt/sysimage/ instead of /.
@@ -356,7 +356,7 @@ class Path:
         return os.path.isdir(path)
 
 
-class Writer:
+class Writer(object):
 
     def __init__(self):
         self.ent_dir = require(ENT_DIR)

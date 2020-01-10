@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # common calls to get product and entitlemnt info for gui/tui
 #
@@ -14,7 +16,6 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-import gettext
 import glob
 import logging
 import os
@@ -23,19 +24,16 @@ import shutil
 import stat
 import syslog
 
-from rhsm import connection
 from rhsm.config import initConfig
 from rhsm.certificate import Key, CertificateException, create_from_pem
-
 
 import subscription_manager.cache as cache
 from subscription_manager.cert_sorter import StackingGroupSorter, ComplianceManager
 from subscription_manager import identity
-from subscription_manager.facts import Facts
 from subscription_manager.injection import require, CERT_SORTER, \
         IDENTITY, ENTITLEMENT_STATUS_CACHE, \
         PROD_STATUS_CACHE, ENT_DIR, PROD_DIR, CP_PROVIDER, OVERRIDE_STATUS_CACHE, \
-        POOLTYPE_CACHE, RELEASE_STATUS_CACHE
+        POOLTYPE_CACHE, RELEASE_STATUS_CACHE, FACTS, POOL_STATUS_CACHE
 from subscription_manager import isodate
 from subscription_manager.jsonwrapper import PoolWrapper
 from subscription_manager.repolib import RepoActionInvoker
@@ -45,9 +43,9 @@ from subscription_manager import utils
 from subscription_manager.identity import ConsumerIdentity
 from dateutil.tz import tzlocal
 
-log = logging.getLogger(__name__)
+from subscription_manager.i18n import ugettext as _
 
-_ = gettext.gettext
+log = logging.getLogger(__name__)
 
 cfg = initConfig()
 ENT_CONFIG_DIR = cfg.get('rhsm', 'entitlementCertDir')
@@ -68,15 +66,10 @@ def persist_consumer_cert(consumerinfo):
     cert_dir = cfg.get('rhsm', 'consumerCertDir')
     if not os.path.isdir(cert_dir):
         os.mkdir(cert_dir)
-    # unsure if this could be injected?
-    consumer = identity.ConsumerIdentity(consumerinfo['idCert']['key'],
-                                         consumerinfo['idCert']['cert'])
+    consumer = identity.ConsumerIdentity(consumerinfo['idCert']['key'], consumerinfo['idCert']['cert'])
     consumer.write()
-    consumer_info = {"consumer_name": consumer.getConsumerName(),
-                     "uuid": consumer.getConsumerId()}
-    log.info("Consumer created: %s" % consumer_info)
+    log.info("Consumer created: %s (%s)" % (consumer.getConsumerName(), consumer.getConsumerId()))
     system_log("Registered system with identity: %s" % consumer.getConsumerId())
-    return consumer_info
 
 
 class CertificateFetchError(Exception):
@@ -84,8 +77,7 @@ class CertificateFetchError(Exception):
         self.errors = errors
 
     def __str__(self, reason=""):
-        msg = 'Entitlement Certificate(s) update failed due to the following reasons:\n' + \
-        '\n'.join(self.errors)
+        msg = 'Entitlement Certificate(s) update failed due to the following reasons:\n' + '\n'.join(self.errors)
         return msg
 
 
@@ -149,7 +141,7 @@ class PoolFilter(object):
                         str(productid) == d['productId']:
                     matched_data_dict[d['id']] = d
 
-        return matched_data_dict.values()
+        return list(matched_data_dict.values())
 
     def filter_out_installed(self, pools):
         """
@@ -169,7 +161,7 @@ class PoolFilter(object):
                     del matched_data_dict[d['id']]
                     break
 
-        return matched_data_dict.values()
+        return list(matched_data_dict.values())
 
     def filter_product_name(self, pools, contains_text):
         """
@@ -225,7 +217,7 @@ class PoolFilter(object):
             if wrapped_pool.get_product_attributes('type')['type'] == 'SVC':
                 provided_ids.add(pool['productId'])
             overlap = 0
-            possible_overlap_pids = provided_ids.intersection(entitled_product_ids_to_certs.keys())
+            possible_overlap_pids = provided_ids.intersection(list(entitled_product_ids_to_certs.keys()))
             for productid in possible_overlap_pids:
                 if self._dates_overlap(pool, entitled_product_ids_to_certs[productid]) \
                         and productid not in self.sorter.partially_valid_products:
@@ -249,7 +241,7 @@ class PoolFilter(object):
         (ie has multi-entitle).
         """
         resubscribeable_pool_ids = [pool['id'] for pool in
-                                    compatible_pools.values()]
+                                    list(compatible_pools.values())]
 
         filtered_pools = []
         for pool in pools:
@@ -259,14 +251,30 @@ class PoolFilter(object):
         return filtered_pools
 
 
-def list_pools(uep, consumer_uuid, facts, list_all=False, active_on=None, filter_string=None):
+def list_pools(uep, consumer_uuid, list_all=False, active_on=None, filter_string=None):
     """
     Wrapper around the UEP call to fetch pools, which forces a facts update
     if anything has changed before making the request. This ensures the
     rule checks server side will have the most up to date info about the
     consumer possible.
     """
-    facts.update_check(uep, consumer_uuid)
+
+    # client tells service 'look for facts again'
+    # if service finds new facts:
+    #     -emit a signal?
+    #     - or just update properties
+    #       - and set a 'been_synced' property to False
+    # client waits for facts check to finish
+    # if no changes or been_synced=True, continue
+    # if changes or unsynced:
+    #    subman updates candlepin with the latest version of services GetFacts() [blocking]
+    #    when finished, subman emit's 'factsSyncFinished'
+    #        - then service flops 'been_synced' property
+    #    -or- subman calls 'here_are_the_latest_facts_to_the_server()' on service
+    #         then service flops 'been_synced' property
+    # subman gets signal that props changed, and that been_synced is now true
+    # since it's been synced, then subman continues
+    require(FACTS).update_check(uep, consumer_uuid)
 
     profile_mgr = cache.ProfileManager()
     profile_mgr.update_check(uep, consumer_uuid)
@@ -281,13 +289,10 @@ def list_pools(uep, consumer_uuid, facts, list_all=False, active_on=None, filter
 # TODO: This method is morphing the actual pool json and returning a new
 # dict which does not contain all the pool info. Not sure if this is really
 # necessary. Also some "view" specific things going on in here.
-def get_available_entitlements(facts, get_all=False, active_on=None,
-        overlapping=False, uninstalled=False, text=None, filter_string=None):
+def get_available_entitlements(get_all=False, active_on=None, overlapping=False,
+                               uninstalled=False, text=None, filter_string=None):
     """
     Returns a list of entitlement pools from the server.
-
-    Facts will be updated if appropriate before making the request, to ensure
-    the rules on the server will pass if appropriate.
 
     The 'all' setting can be used to return all pools, even if the rules do
     not pass. (i.e. show pools that are incompatible for your hardware)
@@ -309,7 +314,7 @@ def get_available_entitlements(facts, get_all=False, active_on=None,
         'management_enabled'
     ]
 
-    pool_stash = PoolStash(Facts(require(ENT_DIR), require(PROD_DIR)))
+    pool_stash = PoolStash()
     dlist = pool_stash.get_filtered_pools_list(active_on, not get_all,
            overlapping, uninstalled, text, filter_string)
 
@@ -444,9 +449,8 @@ class PoolStash(object):
     Object used to fetch pools from the server, sort them into compatible,
     incompatible, and installed lists. Also does filtering based on name.
     """
-    def __init__(self, facts):
+    def __init__(self):
         self.identity = require(IDENTITY)
-        self.facts = facts
         self.sorter = None
 
         # Pools which passed rules server side for this consumer:
@@ -477,7 +481,7 @@ class PoolStash(object):
         self.compatible_pools = {}
         log.debug("Refreshing pools from server...")
         for pool in list_pools(require(CP_PROVIDER).get_consumer_auth_cp(),
-                self.identity.uuid, self.facts, active_on=active_on):
+                self.identity.uuid, active_on=active_on):
             self.compatible_pools[pool['id']] = pool
             self.all_pools[pool['id']] = pool
 
@@ -485,7 +489,7 @@ class PoolStash(object):
         # Sadly this currently requires a second query to the server.
         self.incompatible_pools = {}
         for pool in list_pools(require(CP_PROVIDER).get_consumer_auth_cp(),
-                self.identity.uuid, self.facts, list_all=True, active_on=active_on):
+                self.identity.uuid, list_all=True, active_on=active_on):
             if not pool['id'] in self.compatible_pools:
                 self.incompatible_pools[pool['id']] = pool
                 self.all_pools[pool['id']] = pool
@@ -516,11 +520,11 @@ class PoolStash(object):
 
         if incompatible:
             for pool in list_pools(require(CP_PROVIDER).get_consumer_auth_cp(),
-                    self.identity.uuid, self.facts, active_on=active_on, filter_string=filter_string):
+                    self.identity.uuid, active_on=active_on, filter_string=filter_string):
                 self.compatible_pools[pool['id']] = pool
         else:  # --all has been used
             for pool in list_pools(require(CP_PROVIDER).get_consumer_auth_cp(),
-                    self.identity.uuid, self.facts, list_all=True, active_on=active_on, filter_string=filter_string):
+                    self.identity.uuid, list_all=True, active_on=active_on, filter_string=filter_string):
                 self.all_pools[pool['id']] = pool
 
         return self._filter_pools(incompatible, overlapping, uninstalled, False, text)
@@ -539,9 +543,9 @@ class PoolStash(object):
 
         log.debug("Filtering %d total pools" % len(self.all_pools))
         if not incompatible:
-            pools = self.all_pools.values()
+            pools = list(self.all_pools.values())
         else:
-            pools = self.compatible_pools.values()
+            pools = list(self.compatible_pools.values())
             log.debug("\tRemoved %d incompatible pools" %
                        len(self.incompatible_pools))
 
@@ -695,7 +699,7 @@ class ImportFileExtractor(object):
         return key_content
 
     def get_cert_content(self):
-        cert_content = None
+        cert_content = ''
         if self._CERT_DICT_TAG in self.parts:
             cert_content = self.parts[self._CERT_DICT_TAG]
         if self._ENT_DICT_TAG in self.parts:
@@ -784,23 +788,6 @@ def format_date(dt):
         return ""
 
 
-def unregister(uep, consumer_uuid):
-    """
-    Shared logic for un-registration.
-    """
-    try:
-        uep.unregisterConsumer(consumer_uuid)
-        log.info("Successfully un-registered.")
-        system_log("Unregistered machine with identity: %s" % consumer_uuid)
-        clean_all_data(backup=False)
-    except connection.GoneException, ge:
-        if ge.deleted_id == consumer_uuid:
-            log.info("This consumer's profile has been deleted from the server. Local certificates and cache will be cleaned now.")
-            clean_all_data(backup=False)
-        else:
-            raise ge
-
-
 # FIXME: move me to identity.py
 def check_identity_cert_perms():
     """
@@ -862,7 +849,9 @@ def clean_all_data(backup=True):
     # for deleting persistent caches
     cache.ProfileManager.delete_cache()
     cache.InstalledProductsManager.delete_cache()
-    Facts.delete_cache()
+
+    # FIXME: implement as dbus client to facts service DeleteCache() once implemented
+    #Facts.delete_cache()
 
     # WrittenOverridesCache is also a subclass of cache.CacheManager, but
     # it is deleted in RepoActionInvoker.delete_repo_file() below.
@@ -872,6 +861,7 @@ def clean_all_data(backup=True):
     # the delete_cache on the instances created in injectioninit.
     require(ENTITLEMENT_STATUS_CACHE).delete_cache()
     require(PROD_STATUS_CACHE).delete_cache()
+    require(POOL_STATUS_CACHE).delete_cache()
     require(OVERRIDE_STATUS_CACHE).delete_cache()
     require(RELEASE_STATUS_CACHE).delete_cache()
 

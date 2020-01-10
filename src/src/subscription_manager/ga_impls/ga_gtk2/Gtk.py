@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Question: So, why not just 'from gtk import *' ?
 # Answer: Because there are name collisions and semantic changes. So this
@@ -36,6 +38,7 @@ from gtk import main_iteration
 from gtk import main_quit
 from gtk import check_version
 from gtk import window_set_default_icon_name
+from gtk import show_uri as _show_uri
 
 # gtk2 (or more specifically, pygtk2) provided all of it's enums and
 # constants in the top level 'gtk' module. Gtk3 (or more specifically, gobject
@@ -111,6 +114,7 @@ class GaImage(Image):
     def new_from_icon_name(cls, icon_name, size):
         return image_new_from_icon_name(icon_name, size)
 
+
 # NOTE: ga.Gtk.Image will be the GaImage subclass above, and not the gtk2
 #       gtk.Image. However, aside from the added constructor, the rest of
 #       the Gtk.Image is not provided here.
@@ -123,7 +127,13 @@ class GaWindow(Window):
     def set_default_icon_name(cls, icon_name):
         window_set_default_icon_name(icon_name)
 
+
 Window = GaWindow
+
+
+def show_uri(screen, uri, timestamp):
+    """Gtk2 version requires the third parameter to be int type"""
+    return _show_uri(screen, uri, int(timestamp))
 
 
 # Attempt to keep the list of faux Gtk 3 names we are
@@ -142,6 +152,6 @@ widgets = [AboutDialog, Adjustment, Builder, Button, Calendar, CellRendererPixbu
            RadioButton, SpinButton, TextBuffer, TreeStore, TreeView, TreeViewColumn,
            VBox, Viewport, Window]
 
-methods = [check_version, events_pending, main, main_iteration, main_quit]
+methods = [check_version, events_pending, main, main_iteration, main_quit, show_uri]
 
 __all__ = widgets + constants + methods + enums

@@ -1,3 +1,4 @@
+from __future__ import print_function, division, absolute_import
 
 #
 # Copyright (c) 2010 Red Hat, Inc.
@@ -13,8 +14,6 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 import os
 import threading
@@ -34,11 +33,38 @@ import subscription_manager.injection as inj
 from subscription_manager.gui import progress
 from subscription_manager.gui import widgets
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
+
+log = logging.getLogger(__name__)
 
 DIR = os.path.dirname(__file__)
 
-log = logging.getLogger(__name__)
+
+# From old smolt code... Force glibc to call res_init()
+# to rest the resolv configuration, including reloading
+# resolv.conf. This attempt to handle the case where we
+# start up with no networking, fail name resolution calls,
+# and cache them for the life of the process, even after
+# the network starts up, and for dhcp, updates resolv.conf
+def reset_resolver():
+    """Attempt to reset the system hostname resolver.
+    returns 0 on success, or -1 if an error occurs."""
+    try:
+        import ctypes
+        try:
+            resolv = ctypes.CDLL("libc.so.6")
+            r = resolv.__res_init()
+        except (OSError, AttributeError):
+            log.warn("could not find __res_init in libc.so.6")
+            r = -1
+        return r
+    except ImportError:
+        # If ctypes isn't supported (older versions of python for example)
+        # Then just don't do anything
+        pass
+    except Exception as e:
+        log.warning("reset_resolver failed: %s", e)
+        pass
 
 
 class NetworkConfigDialog(widgets.SubmanBaseWidget):
@@ -52,7 +78,7 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
     widget_names = ["networkConfigDialog", "enableProxyButton", "enableProxyAuthButton",
                     "proxyEntry", "proxyUserEntry", "proxyPasswordEntry",
                     "cancelButton", "saveButton", "testConnectionButton",
-                    "connectionStatusLabel"]
+                    "connectionStatusLabel", "enableProxyBypassButton", "noProxyEntry"]
     gui_file = "networkConfig"
 
     def __init__(self):
@@ -71,20 +97,25 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
         self.set_initial_values()
         self.enableProxyButton.connect("toggled", self.enable_action)
         self.enableProxyAuthButton.connect("toggled", self.enable_action)
+        self.enableProxyBypassButton.connect("toggled", self.enable_action)
 
         self.enableProxyButton.connect("toggled", self.clear_connection_label)
         self.enableProxyAuthButton.connect("toggled", self.clear_connection_label)
+        self.enableProxyBypassButton.connect("toggled", self.clear_connection_label)
 
         self.enableProxyButton.connect("toggled", self.enable_or_disable_test_button)
         self.enableProxyAuthButton.connect("toggled", self.enable_or_disable_test_button)
+        self.enableProxyBypassButton.connect("toggled", self.enable_or_disable_test_button)
 
         self.proxyEntry.connect("changed", self.clear_connection_label)
         self.proxyUserEntry.connect("changed", self.clear_connection_label)
         self.proxyPasswordEntry.connect("changed", self.clear_connection_label)
+        self.noProxyEntry.connect("changed", self.clear_connection_label)
 
         self.proxyEntry.connect("changed", self.enable_or_disable_test_button)
         self.proxyUserEntry.connect("changed", self.enable_or_disable_test_button)
         self.proxyPasswordEntry.connect("changed", self.enable_or_disable_test_button)
+        self.noProxyEntry.connect("changed", self.enable_or_disable_test_button)
 
         self.proxyEntry.connect("focus-out-event", self.clean_proxy_entry)
 
@@ -103,14 +134,19 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
         self.proxyEntry.set_text("%s" % proxy_url)
 
         # show proxy/proxy auth sections as being enabled if we have values set
-        # rhn actualy has a seperate for config flag for enabling, which seems overkill
+        # rhn actually has a separate for config flag for enabling, which seems overkill
         if self.cfg.get("server", "proxy_hostname"):
             self.enableProxyButton.set_active(True)
         if self.cfg.get("server", "proxy_hostname") and self.cfg.get("server", "proxy_user"):
             self.enableProxyAuthButton.set_active(True)
+        if self.cfg.get("server", "no_proxy"):
+            no_proxy = self.cfg.get("server", "no_proxy")
+            self.noProxyEntry.set_text(no_proxy)
+            self.enableProxyBypassButton.set_active(True)
 
         self.enable_action(self.enableProxyAuthButton)
         self.enable_action(self.enableProxyButton)
+        self.enable_action(self.enableProxyBypassButton)
 
         # the extra or "" are to make sure we don't str None
         self.proxyUserEntry.set_text(str(self.cfg.get("server", "proxy_user") or ""))
@@ -121,11 +157,14 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
         self.enable_or_disable_test_button()
         if not self.enableProxyButton.get_active():
             self.enableProxyAuthButton.set_sensitive(False)
+            self.enableProxyBypassButton.set_sensitive(False)
 
     def write_values(self, widget=None, dummy=None):
         proxy = self.proxyEntry.get_text() or ""
 
         # don't save these values if they are disabled in the gui
+
+        # settings of HTTP Proxy
         if proxy and self.enableProxyButton.get_active():
             # Remove any URI scheme provided
             proxy = remove_scheme(proxy)
@@ -144,6 +183,7 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
             self.cfg.set("server", "proxy_hostname", "")
             self.cfg.set("server", "proxy_port", "")
 
+        # settings of HTTP proxy authentication
         if self.enableProxyAuthButton.get_active():
             if self.proxyUserEntry.get_text() is not None:
                 self.cfg.set("server", "proxy_user",
@@ -155,6 +195,14 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
         else:
             self.cfg.set("server", "proxy_user", "")
             self.cfg.set("server", "proxy_password", "")
+
+        # settings of bypass the HTTP proxy for specific host/domain
+        if self.enableProxyBypassButton.get_active():
+            if self.noProxyEntry.get_text() is not None:
+                self.cfg.set("server", "no_proxy",
+                         str(self.noProxyEntry.get_text()))
+        else:
+            self.cfg.set("server", "no_proxy", "")
 
         try:
             self.cfg.save()
@@ -204,16 +252,17 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
     def _reset_socket_timeout(self):
         socket.setdefaulttimeout(self.org_timeout)
 
-    def test_connection_wrapper(self, proxy_host, proxy_port, proxy_user, proxy_password):
-        connection_status = self.test_connection(proxy_host, proxy_port, proxy_user, proxy_password)
+    def test_connection_wrapper(self, proxy_host, proxy_port, proxy_user, proxy_password, no_proxy):
+        connection_status = self.test_connection(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy)
         ga_GObject.idle_add(self.on_test_connection_finish, connection_status)
 
-    def test_connection(self, proxy_host, proxy_port, proxy_user, proxy_password):
+    def test_connection(self, proxy_host, proxy_port, proxy_user, proxy_password, no_proxy):
         cp = connection.UEPConnection(
                     proxy_hostname=proxy_host,
                     proxy_port=proxy_port,
                     proxy_user=proxy_user,
-                    proxy_password=proxy_password)
+                    proxy_password=proxy_password,
+                    no_proxy=no_proxy)
         try:
             socket.setdefaulttimeout(10)
             cp.getStatus()
@@ -226,11 +275,11 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
             log.warn("Reporting proxy connection as good despite %s" %
              e)
             return True
-        except connection.NetworkException, e:
+        except connection.NetworkException as e:
             log.warn("%s when attempting to connect through %s:%s" %
              (e.code, proxy_host, proxy_port))
             return False
-        except Exception, e:
+        except Exception as e:
             log.exception("'%s' when attempting to connect through %s:%s" %
                       (e, proxy_host, proxy_port))
             return False
@@ -260,10 +309,10 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
             proxy_host = proxy_info[2]
             proxy_port = proxy_info[3]
 
-        except rhsm.utils.ServerUrlParseErrorPort, e:
+        except rhsm.utils.ServerUrlParseErrorPort as e:
             proxy_host = proxy_url.split(':')[0]
             proxy_port = rhsm.config.DEFAULT_PROXY_PORT
-        except rhsm.utils.ServerUrlParseError, e:
+        except rhsm.utils.ServerUrlParseError as e:
             log.error(e)
         return (proxy_host, proxy_port)
 
@@ -281,9 +330,13 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
             proxy_user = None
             proxy_password = None
 
+        no_proxy = None
+        if self.enableProxyBypassButton.get_active():
+            no_proxy = self.noProxyEntry.get_text()
+
         self._display_progress_bar()
         threading.Thread(target=self.test_connection_wrapper,
-                         args=(proxy_host, proxy_port, proxy_user, proxy_password),
+                         args=(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy),
                          name='TestNetworkConnectionThread').start()
 
     def deleted(self, event, data):
@@ -315,6 +368,7 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
             self.proxyEntry.set_sensitive(button.get_active())
             self.proxyEntry.grab_focus()
             self.enableProxyAuthButton.set_sensitive(button.get_active())
+            self.enableProxyBypassButton.set_sensitive(button.get_active())
             # Proxy authentication should only be active if proxy is also enabled
             self.proxyUserEntry.set_sensitive(button.get_active() and
                     self.enableProxyAuthButton.get_active())
@@ -325,6 +379,9 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
             self.proxyPasswordEntry.set_sensitive(button.get_active())
             self.get_object("usernameLabel").set_sensitive(button.get_active())
             self.get_object("passwordLabel").set_sensitive(button.get_active())
+        elif button.get_name() == "enableProxyBypassButton":
+            self.noProxyEntry.set_sensitive(button.get_active())
+            self.noProxyEntry.grab_focus()
 
     def set_parent_window(self, window):
         self.networkConfigDialog.set_transient_for(window)

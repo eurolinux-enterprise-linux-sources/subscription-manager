@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -12,8 +14,6 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 import os
 
@@ -23,9 +23,9 @@ from subscription_manager.gui import messageWindow
 from subscription_manager.gui.utils import show_error_window
 from subscription_manager.managerlib import ImportFileExtractor
 
-log = logging.getLogger(__name__)
+from subscription_manager.i18n import ugettext as _
 
-_ = gettext.gettext
+log = logging.getLogger(__name__)
 
 
 class ImportSubDialog(object):
@@ -39,7 +39,7 @@ class ImportSubDialog(object):
         self.dialog = ga_Gtk.FileChooserDialog(_("Import Certificates"),
                 None, ga_Gtk.FileChooserAction.OPEN,
                 (ga_Gtk.STOCK_CANCEL, ga_Gtk.ResponseType.CANCEL,
-                 _("Import"), ga_Gtk.ResponseType.OK))
+                 _("Import").encode('utf-8', 'replace'), ga_Gtk.ResponseType.OK))
         self.dialog.set_default_response(ga_Gtk.ResponseType.OK)
         self.dialog.set_modal(True)
 
@@ -104,7 +104,7 @@ class ImportSubDialog(object):
                         extractor.write_to_disk()
                         good_certs.append(cert_file)
                         imported_certs.append(extractor.get_cert())
-                except Exception, e:
+                except Exception as e:
                     # Should not get here unless something really bad happened.
                     log.exception(e)
                     error_certs.append(cert_file)

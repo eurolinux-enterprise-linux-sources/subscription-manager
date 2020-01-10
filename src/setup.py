@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from __future__ import print_function, division, absolute_import
 
 #
 # Copyright (c) 2014 Red Hat, Inc.
@@ -19,7 +20,7 @@ import re
 import subprocess
 
 from glob import glob
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, Extension
 
 
 from distutils import log
@@ -30,7 +31,7 @@ from distutils.command.clean import clean as _clean
 from distutils.command.build_py import build_py as _build_py
 from distutils.dir_util import remove_tree
 
-from build_ext import i18n, lint
+from build_ext import i18n, lint, template
 from build_ext.utils import Utils
 
 
@@ -97,12 +98,14 @@ class clean(_clean):
 class install(_install):
     user_options = _install.user_options + [
         ('gtk-version=', None, 'GTK version this is built for'),
-        ('rpm-version=', None, 'version and release of the RPM this is built for')]
+        ('rpm-version=', None, 'version and release of the RPM this is built for'),
+        ('with-systemd=', None, 'whether to install w/ systemd support or not')]
 
     def initialize_options(self):
         _install.initialize_options(self)
         self.rpm_version = None
         self.gtk_version = None
+        self.with_systemd = None
 
     def finalize_options(self):
         _install.finalize_options(self)
@@ -132,7 +135,7 @@ class build(_build):
         try:
             cmd = ["git", "describe"]
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-            output = process.communicate()[0].strip()
+            output = process.communicate()[0].decode('utf-8').strip()
             if output.startswith(self.git_tag_prefix):
                 return output[len(self.git_tag_prefix):]
         except OSError:
@@ -143,7 +146,7 @@ class build(_build):
     def get_gtk_version(self):
         cmd = ['rpm', '--eval=%dist']
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-        output = process.communicate()[0].strip()
+        output = process.communicate()[0].decode('utf-8').strip()
         if re.search('el6', output):
             return "2"
         return "3"
@@ -155,28 +158,38 @@ class build(_build):
         except StopIteration:
             return False
 
-    sub_commands = _build.sub_commands + [('build_trans', has_po_files)]
+    sub_commands = _build.sub_commands + [('build_trans', has_po_files), ('build_template', lambda arg: True)]
 
 
 class install_data(_install_data):
     """Used to intelligently install data files.  For example, files that must be generated (such as .mo files
     or desktop files with merged translations) or an entire tree of data files.
     """
+    user_options = _install_data.user_options + [
+        ('with-systemd=', None, 'whether to install w/ systemd support or not')]
 
     def initialize_options(self):
-        self.transforms = None
-        # Can't use super() because Command isn't a new-style class.
         _install_data.initialize_options(self)
+        self.transforms = None
+        self.with_systemd = None
+        # Can't use super() because Command isn't a new-style class.
 
     def finalize_options(self):
+        _install_data.finalize_options(self)
         if self.transforms is None:
             self.transforms = []
-        _install_data.finalize_options(self)
+        self.set_undefined_options('install', ('with_systemd', 'with_systemd'))
+        if self.with_systemd is None:
+            self.with_systemd = True  # default to True
+        else:
+            self.with_systemd = self.with_systemd == 'true'
 
     def run(self):
         self.add_messages()
         self.add_desktop_files()
         self.add_icons()
+        self.add_dbus_service_files()
+        self.add_systemd_services()
         _install_data.run(self)
         self.transform_files()
 
@@ -213,6 +226,23 @@ class install_data(_install_data):
         autostart_file = self.join('build', 'autostart', 'rhsm-icon.desktop')
         self.data_files.append((autostart_dir, [autostart_file]))
 
+    def add_dbus_service_files(self):
+        dbus_service_directory = self.join('share', 'dbus-1', 'system-services')
+        if self.with_systemd:
+            source_dir = self.join('build', 'dbus', 'system-services-systemd')
+        else:
+            source_dir = self.join('build', 'dbus', 'system-services')
+        for file in os.listdir(source_dir):
+            self.data_files.append((dbus_service_directory, [self.join(source_dir, file)]))
+
+    def add_systemd_services(self):
+        if not self.with_systemd:
+            return  # if we're not installing for systemd, stop!
+        systemd_install_directory = self.join('lib', 'systemd', 'system')
+        source_dir = self.join('build', 'dbus', 'systemd')
+        for file in os.listdir(self.join('build', 'dbus', 'systemd')):
+            self.data_files.append((systemd_install_directory, [self.join(source_dir, file)]))
+
     def add_icons(self):
         icon_source_root = self.join('src', 'subscription_manager', 'gui', 'data', 'icons', 'hicolor')
         for d in os.listdir(icon_source_root):
@@ -224,7 +254,10 @@ class install_data(_install_data):
 
 setup_requires = []
 
-install_requires = []
+install_requires = [
+        'six',
+        'kitchen',
+    ]
 
 test_require = [
       'mock',
@@ -245,6 +278,7 @@ cmdclass = {
     'build': build,
     'build_py': rpm_version_release_build_py,
     'build_trans': i18n.BuildTrans,
+    'build_template': template.BuildTemplate,
     'update_trans': i18n.UpdateTrans,
     'uniq_trans': i18n.UniqTrans,
     'gettext': i18n.Gettext,
@@ -261,20 +295,20 @@ transforms = [
 try:
     cmd = ['rpm', '--eval=%_libexecdir']
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    libexecdir = process.communicate()[0].strip()
+    libexecdir = process.communicate()[0].decode('utf-8').strip()
 except OSError:
     libexecdir = 'libexec'
 
 setup(
     name="subscription-manager",
-    version='1.18.10',
+    version='1.20.10',
     url="http://www.candlepinproject.org",
     description="Manage subscriptions for Red Hat products.",
     license="GPLv2",
     author="Adrian Likins",
     author_email="alikins@redhat.com",
     cmdclass=cmdclass,
-    packages=find_packages('src', exclude=['subscription_manager.gui.firstboot.*', '*.ga_impls', '*.ga_impls.*', '*.plugin.ostree']),
+    packages=find_packages('src', exclude=['subscription_manager.gui.firstboot.*', '*.ga_impls', '*.ga_impls.*', '*.plugin.ostree', '*.services.examples']),
     package_dir={'': 'src'},
     package_data={
         'subscription_manager.gui': ['data/glade/*.glade', 'data/ui/*.ui', 'data/icons/*.svg'],
@@ -282,7 +316,7 @@ setup(
     data_files=[
         ('sbin', ['bin/subscription-manager', 'bin/subscription-manager-gui', 'bin/rhn-migrate-classic-to-rhsm']),
         ('bin', ['bin/rct', 'bin/rhsm-debug']),
-        (libexecdir, ['src/daemons/rhsmcertd-worker.py']),
+        (libexecdir, ['src/daemons/rhsmcertd-worker.py', 'bin/rhsm-facts-service', 'bin/rhsm-service']),
         # sat5to6 is packaged separately
         ('share/man/man8', set(glob('man/*.8')) - set(['man/sat5to6.8'])),
         ('share/man/man5', glob('man/*.5')),
@@ -305,5 +339,7 @@ setup(
     setup_requires=setup_requires,
     install_requires=install_requires,
     tests_require=test_require,
+    ext_modules=[Extension('rhsm._certificate', ['src/certificate.c'],
+                           libraries=['ssl', 'crypto'])],
     test_suite='nose.collector',
 )

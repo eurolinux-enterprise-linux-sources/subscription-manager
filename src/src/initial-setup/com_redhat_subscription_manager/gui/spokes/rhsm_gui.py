@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (C) 2015  Red Hat, Inc.
 #
@@ -34,8 +36,8 @@ ga_loader.init_ga(gtk_version="3")
 from subscription_manager.ga import GObject as ga_GObject
 from subscription_manager.ga import Gtk as ga_Gtk
 from subscription_manager.gui import managergui
+from subscription_manager.i18n import configure_gettext
 from subscription_manager.injectioninit import init_dep_injection
-from subscription_manager import injection as inj
 from subscription_manager.gui import registergui
 from subscription_manager import utils
 from subscription_manager.gui import utils as gui_utils
@@ -43,6 +45,8 @@ from subscription_manager.gui import utils as gui_utils
 ga_GObject.threads_init()
 
 __all__ = ["RHSMSpoke"]
+
+configure_gettext()
 
 
 class RHSMSpoke(FirstbootOnlySpokeMixIn, NormalSpoke):
@@ -52,7 +56,7 @@ class RHSMSpoke(FirstbootOnlySpokeMixIn, NormalSpoke):
     helpFile = "SubscriptionManagerSpoke.xml"
     category = SystemCategory
     icon = "subscription-manager"
-    title = "Subscription Manager"
+    title = "_Subscription Manager"
 
     def __init__(self, data, storage, payload, instclass):
         NormalSpoke.__init__(self, data, storage, payload, instclass)
@@ -65,16 +69,16 @@ class RHSMSpoke(FirstbootOnlySpokeMixIn, NormalSpoke):
 
         init_dep_injection()
 
-        facts = inj.require(inj.FACTS)
-
         backend = managergui.Backend()
         self.info = registergui.RegisterInfo()
         self.info.connect('notify::register-status', self._on_register_status_change)
         self._status = self.info.get_property('register-status')
 
-        self.register_widget = registergui.RegisterWidget(backend, facts,
-                                                          reg_info=self.info,
-                                                          parent_window=self.main_window)
+        self.register_widget = registergui.RegisterWidget(
+            backend,
+            reg_info=self.info,
+            parent_window=self.main_window
+        )
 
         self.register_box = self.builder.get_object("register_box")
         self.button_box = self.builder.get_object('navigation_button_box')

@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2014 Red Hat, Inc.
 #
@@ -27,10 +29,7 @@ class BaseActionClient(object):
     An object used to update the certficates, yum repos, and facts for the system.
     """
 
-    # can we inject both of these?
-    def __init__(self, facts=None):
-
-        self.facts = facts
+    def __init__(self):
 
         self._libset = self._get_libset()
         self.lock = inj.require(inj.ACTION_LOCK)
@@ -63,12 +62,12 @@ class BaseActionClient(object):
             update_report = lib.update()
         # see bz#852706, reraise GoneException so that
         # consumer cert deletion works
-        except GoneException, e:
+        except GoneException as e:
             raise
         # raise this so it can be exposed clearly
-        except ExpiredIdentityCertException, e:
+        except ExpiredIdentityCertException as e:
             raise
-        except Exception, e:
+        except Exception as e:
             log.warning("Exception caught while running %s update" % lib)
             log.exception(e)
 

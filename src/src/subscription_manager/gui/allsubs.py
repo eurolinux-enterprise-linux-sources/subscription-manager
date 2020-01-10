@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -12,9 +14,7 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
 import datetime
-import gettext
 import logging
 
 from subscription_manager.ga import Gtk as ga_Gtk
@@ -32,7 +32,7 @@ from subscription_manager.jsonwrapper import PoolWrapper
 from subscription_manager import managerlib
 from subscription_manager.managerlib import allows_multi_entitlement, valid_quantity
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class AllSubscriptionsTab(widgets.SubscriptionManagerTab):
                         'filter_options_button', 'applied_filters_label']
     gui_file = "allsubs"
 
-    def __init__(self, backend, facts, parent_win):
+    def __init__(self, backend, parent_win):
 
         super(AllSubscriptionsTab, self).__init__()
 
@@ -59,13 +59,12 @@ class AllSubscriptionsTab(widgets.SubscriptionManagerTab):
         self.parent_win = parent_win
         self.backend = backend
         self.identity = require(IDENTITY)
-        self.facts = facts
 
         # Progress bar
         self.pb = None
         self.timer = 0
 
-        self.pool_stash = managerlib.PoolStash(self.facts)
+        self.pool_stash = managerlib.PoolStash()
 
         self.async_bind = async.AsyncBind(self.backend.certlib)
 
@@ -220,7 +219,7 @@ class AllSubscriptionsTab(widgets.SubscriptionManagerTab):
         # Hide the no subscriptions label and show the pools list:
         self.widget_switcher.set_active(1)
 
-        sorter = managerlib.MergedPoolsStackingGroupSorter(merged_pools.values())
+        sorter = managerlib.MergedPoolsStackingGroupSorter(list(merged_pools.values()))
         for group in sorter.groups:
             tree_iter = None
             if group.name and len(group.entitlements) > 1:
@@ -238,7 +237,7 @@ class AllSubscriptionsTab(widgets.SubscriptionManagerTab):
                 pool = entry.pools[0]
                 # Use the maximum suggested quantity, not the first one.  BZ 1022198
                 # This is still incorrect when quantities from multiple merged pools are required
-                suggested_quantity = max(map(lambda p: self.calculate_default_quantity(p), entry.pools))
+                suggested_quantity = max([self.calculate_default_quantity(p) for p in entry.pools])
 
                 pool_type = PoolWrapper(pool).get_pool_type()
 
@@ -366,7 +365,7 @@ class AllSubscriptionsTab(widgets.SubscriptionManagerTab):
             # fire off async refresh
             async_stash = async.AsyncPool(self.pool_stash)
             async_stash.refresh(self.date_picker.date, self._update_display)
-        except Exception, e:
+        except Exception as e:
             handle_gui_exception(e, _("Error fetching subscriptions from server:  %s"),
                     self.parent_win)
 

@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -12,9 +14,7 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
 import datetime
-import gettext
 import logging
 import os
 import time
@@ -37,18 +37,18 @@ from subscription_manager.gui import storage
 from subscription_manager.gui import utils
 from subscription_manager import managerlib
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
+
+log = logging.getLogger(__name__)
 
 GLADE_DIR = os.path.join(os.path.dirname(__file__), "data/glade")
 UI_DIR = os.path.join(os.path.dirname(__file__), "data/ui")
 UI_SUFFIX = "ui"
 GLADE_SUFFIX = "glade"
 
-
 WARNING_COLOR = '#FFFB82'
 EXPIRED_COLOR = '#FFAF99'
 
-log = logging.getLogger(__name__)
 # Some versions of gtk has incorrect translations for the calendar widget
 # and gtk itself complains about this with errors like:
 #
@@ -198,7 +198,12 @@ class HasSortableWidget(object):
             return -1
         value1 = safe_int(str1, str1)
         value2 = safe_int(str2, str2)
-        return cmp(value1, value2)
+        if value1 < value2:
+            return -1
+        elif value1 == value2:
+            return 0
+        else:
+            return 1
 
     def sort_date(self, model, row1, row2, key):
         date1 = model.get_value(row1, model[key]) \
@@ -207,7 +212,15 @@ class HasSortableWidget(object):
             or datetime.date(datetime.MINYEAR, 1, 1)
         epoch1 = time.mktime(date1.timetuple())
         epoch2 = time.mktime(date2.timetuple())
-        return cmp(epoch1, epoch2)
+        return self._cmp(epoch1, epoch2)
+
+    def _cmp(self, val1, val2):
+        if val1 < val2:
+            return -1
+        elif val1 == val2:
+            return 0
+        else:
+            return 1
 
     def _stripe_rows(self, column, store):
         """
@@ -350,7 +363,7 @@ class SelectionWrapper(object):
     def __getitem__(self, key):
         try:
             return self.model.get_value(self.tree_iter, self.store[key])
-        except TypeError, te:
+        except TypeError as te:
             log.warning('Invalid item request: %s', te)
         return None
 

@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2013 Red Hat, Inc.
 #
@@ -13,20 +15,19 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
 import inspect
 from socket import error as socket_error
 from rhsm.https import ssl, httplib
-import gettext
 
 from rhsm import connection, utils
 
 from subscription_manager.entcertlib import Disconnected
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 SOCKET_MESSAGE = _('Network error, unable to connect to server. Please see /var/log/rhsm/rhsm.log for more information.')
 NETWORK_MESSAGE = _('Network error. Please check the connection details, or see /var/log/rhsm/rhsm.log for more information.')
+PROXY_MESSAGE = _("Proxy error, unable to connect to proxy server.")
 UNAUTHORIZED_MESSAGE = _("Unauthorized: Invalid credentials for request.")
 FORBIDDEN_MESSAGE = _("Forbidden: Invalid credentials for request.")
 REMOTE_SERVER_MESSAGE = _("Remote server error. Please check the connection details, or see /var/log/rhsm/rhsm.log for more information.")
@@ -48,6 +49,7 @@ class ExceptionMapper(object):
         self.message_map = {
             socket_error: (SOCKET_MESSAGE, self.format_default),
             Disconnected: (SOCKET_MESSAGE, self.format_default),
+            connection.ProxyException: (PROXY_MESSAGE, self.format_default),
             connection.NetworkException: (NETWORK_MESSAGE, self.format_default),
             connection.UnauthorizedException: (UNAUTHORIZED_MESSAGE, self.format_default),
             connection.ForbiddenException: (FORBIDDEN_MESSAGE, self.format_default),
@@ -74,7 +76,7 @@ class ExceptionMapper(object):
         return message_template % bad_ca_cert_error.cert_path
 
     def format_ssl_error(self, ssl_error, message_template):
-        return message_template % str(ssl_error)
+        return message_template % ssl_error
 
     def format_restlib_exception(self, restlib_exception, message_template):
         return restlib_exception.msg

@@ -69,34 +69,57 @@ proxy_hostname
 .RS 4
 Set this to a non\-blank value if
 \fBsubscription\-manager\fR
-should use a reverse proxy to access the subscription service\&. This sets the host for the reverse proxy\&.
+should use a reverse proxy to access the subscription service\&. This sets the host for the reverse proxy\&. Overrides hostname from \fBHTTP_PROXY\fR and \fBHTTPS_PROXY\fR environment variables\&.
 .RE
 .PP
 proxy_port
 .RS 4
 Set this to a non\-blank value if
 \fBsubscription\-manager\fR
-should use a reverse proxy to access the subscription service\&. This sets the port for the reverse proxy\&.
+should use a reverse proxy to access the subscription service\&. This sets the port for the reverse proxy\&. Overrides port from \fBHTTP_PROXY\fR and \fBHTTPS_PROXY\fR environment variables\&.
 .RE
 .PP
 proxy_username
 .RS 4
 Set this to a non\-blank value if
 \fBsubscription\-manager\fR
-should use an authenticated reverse proxy to access the subscription service\&. This sets the username for the reverse proxy\&.
+should use an authenticated reverse proxy to access the subscription service\&. This sets the username for the reverse proxy\&. Overrides username from \fBHTTP_PROXY\fR and \fBHTTPS_PROXY\fR environment variables\&.
 .RE
 .PP
 proxy_password
 .RS 4
 Set this to a non\-blank value if
 \fBsubscription\-manager\fR
-should use an authenticated reverse proxy to access the subscription service\&. This sets the password for the reverse proxy\&.
+should use an authenticated reverse proxy to access the subscription service\&. This sets the password for the reverse proxy\&. Overrides password from \fBHTTP_PROXY\fR and \fBHTTPS_PROXY\fR environment variables\&.
+.RE
+.PP
+no_proxy
+.RS 4
+Set this to a non\-blank value if
+\fBsubscription-manager\fR
+should not use a proxy for specific hosts\&. Format is a comma-separated list of hostname suffixes,
+optionally with port\&. '*' is a special value that means do not use a proxy for any host\&. Overrides the \fBNO_PROXY\fR environment variable\&.
 .RE
 .SH "[RHSM] OPTIONS"
 .PP
 baseurl
 .RS 4
 This setting is the prefix for all content which is managed by the subscription service\&. This should be the hostname for the Red Hat CDN, the local Satellite or Capsule depending on your deployment\&.
+Prefix depends on the service type.
+For the Red Hat CDN, the full
+.B baseurl
+is
+.B https://cdn.redhat.com
+\&.
+For Satellite 6, the baseurl is
+.B https://HOSTNAME/pulp/repos
+, so for a hostname of
+.B sat6.example.com
+the full
+.B baseurl
+would be for example:
+.B https://sat6.example.com/pulp/repos
+\&.
 .RE
 .PP
 ca_cert_dir
@@ -158,6 +181,16 @@ pluginConfDir
 .RS 4
 The directory to search for plug-in configuration files
 .RE
+.PP
+auto_enable_yum_plugins
+.RS 4
+When this option is enabled, then yum plugins subscription-manager and product-id are enabled every-time subscription-manager or subscription-manager-gui is executed.
+.RE
+.PP
+inotify
+.RS 4
+Inotify is used for monitoring changes in directories with certificates. Currently only the /etc/pki/consumer directory is monitored by the rhsm.service. When this directory is mounted using a network file system without inotify notification support (e.g. NFS), then disabling inotify is strongly recommended. When inotify is disabled, periodical directory polling is used instead.
+.RE
 .SH "[RHSMCERTD] OPTIONS"
 .PP
 certCheckInterval
@@ -171,6 +204,12 @@ autoAttachInterval
 .RS 4
 The number of minutes between attempts to run auto\-attach on this consumer\&.
 .RE
+.PP
+splay
+.RS 4
+1 to enable splay. 0 to disable splay. If enabled, this feature delays the initial auto attach and cert check by an amount between 0 seconds and the interval given for the action being delayed. For example if the
+.B certCheckInterval
+were set to 3 minutes, the initial cert check would begin somewhere between 2 minutes after start up (minimum delay) and 5 minutes after start up. This is useful to reduce peak load on the Satellite or entitlement service used by a large number of machines.
 .SH "[LOGGING] OPTIONS"
 .PP
 default_log_level

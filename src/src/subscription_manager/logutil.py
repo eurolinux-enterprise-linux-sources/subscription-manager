@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2005-2010 Red Hat, Inc.
 #
@@ -24,7 +26,11 @@ LOG_FORMAT = u'%(asctime)s [%(levelname)s] %(cmd_name)s:%(process)d:' \
 _rhsm_log_handler = None
 _subman_debug_handler = None
 log = None
-ROOT_NAMESPACES = ['subscription_manager', 'rhsm', 'rhsm-app']
+ROOT_NAMESPACES = ['subscription_manager',
+                   'rhsm',
+                   'rhsm-app',
+                   'rhsmlib',
+                   ]
 
 
 # Don't need this for syslog
@@ -57,18 +63,15 @@ class SubmanDebugLoggingFilter(object):
         return self.on
 
 
-# NOTE: python 2.6 and earlier versions of the logging module
-#       defined the log handlers as old style classes. In order
-#       to use super(), we also inherit from 'object'
-class RHSMLogHandler(logging.handlers.RotatingFileHandler, object):
-    """Logging Handler for /var/log/rhsm/rhsm.log"""
-    def __init__(self, *args, **kwargs):
-        try:
-            super(RHSMLogHandler, self).__init__(*args, **kwargs)
-        # fallback to stdout if we can't open our logger
-        except Exception:
-            logging.StreamHandler.__init__(self)
-        self.addFilter(ContextLoggingFilter(name=""))
+def RHSMLogHandler(*args, **kwargs):
+    """Factory for Logging Handler for /var/log/rhsm/rhsm.log"""
+    try:
+        result = logging.handlers.RotatingFileHandler(*args, **kwargs)
+    # fallback to stdout if we can't open our logger
+    except Exception:
+        result = logging.StreamHandler()
+    result.addFilter(ContextLoggingFilter(name=""))
+    return result
 
 
 class SubmanDebugHandler(logging.StreamHandler, object):

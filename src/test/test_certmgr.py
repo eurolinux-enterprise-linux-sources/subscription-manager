@@ -1,3 +1,4 @@
+from __future__ import print_function, division, absolute_import
 
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -16,7 +17,7 @@
 from datetime import datetime, timedelta
 
 import mock
-import stubs
+from . import stubs
 
 from rhsm import ourjson as json
 from subscription_manager import action_client
@@ -24,15 +25,16 @@ from subscription_manager import content_action_client
 from subscription_manager import entcertlib
 from subscription_manager import identitycertlib
 from subscription_manager import repolib
-from subscription_manager import hwprobe
 from subscription_manager import injection
 import subscription_manager.injection as inj
+
+from rhsmlib.facts import hwprobe
 
 from rhsm.profile import RPMProfile
 from rhsm.connection import GoneException
 from rhsm.certificate import GMT
 
-from fixture import SubManFixture
+from .fixture import SubManFixture
 
 
 CONSUMER_DATA = {'releaseVer': {'id': 1, 'releaseVer': '123123'},
@@ -76,7 +78,7 @@ class ActionClientTestBase(SubManFixture):
         self.managerlib_persist_consumer_cert = self.patcher6.start()
 
         # mock out all hardware fetching... we may need to fake socket counts
-        self.hwprobe_getall_patcher = mock.patch.object(hwprobe.Hardware, 'get_all')
+        self.hwprobe_getall_patcher = mock.patch.object(hwprobe.HardwareCollector, 'get_all')
         self.hwprobe_getall_mock = self.hwprobe_getall_patcher.start()
         self.hwprobe_getall_mock.return_value = {}
 

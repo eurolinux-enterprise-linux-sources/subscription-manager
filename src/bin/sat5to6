@@ -1,4 +1,8 @@
-#!/usr/bin/python -S
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2013 Red Hat, Inc.
 #
@@ -17,9 +21,12 @@
 if __name__ != '__main__':
     raise ImportError("module cannot be imported")
 
+# hack to allow bytes/strings to be interpolated w/ unicode values (gettext gives us bytes)
+# Without this, for example, "Формат: %s\n" % u"foobar" will fail with UnicodeDecodeError
+# See http://stackoverflow.com/a/29832646/6124862 for more details
 import sys
+reload(sys)
 sys.setdefaultencoding('utf-8')
-import site  # NOQA - Ignore this flake8 violation
 import os
 
 
@@ -58,9 +65,9 @@ try:
     from subscription_manager.managercli import handle_exception
 except KeyboardInterrupt:
     system_exit(0, "\nUser interrupted process.")
-except ImportError, e:
+except ImportError as err:
     system_exit(2, "Unable to find Subscription Manager module.\n"
-                  "Error: %s" % e)
+                   "Error: %s" % err)
 
 
 def main():

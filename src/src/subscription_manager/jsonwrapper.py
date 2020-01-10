@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 # Copyright (c) 2011 Red Hat, Inc.
 #
 # This software is licensed to you under the GNU General Public License,
@@ -13,11 +15,7 @@
 #
 
 # This module contains wrappers for JSON returned from the CP server.
-
-import gettext
 from subscription_manager.utils import is_true_value
-
-_ = gettext.gettext
 
 
 class PoolWrapper(object):

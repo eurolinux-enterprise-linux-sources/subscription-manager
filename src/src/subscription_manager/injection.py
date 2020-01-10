@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 # Copyright (c) 2013 Red Hat, Inc.
 #
 # This software is licensed to you under the GNU General Public License,
@@ -12,7 +14,7 @@
 # in this software or its documentation.
 #
 
-import types
+import six
 
 # Supported Features:
 IDENTITY = "IDENTITY"
@@ -22,6 +24,7 @@ ENT_DIR = "ENT_DIR"
 PROD_DIR = "PROD_DIR"
 RHSM_ICON_CACHE = "RHSM_ICON_CACHE"
 ENTITLEMENT_STATUS_CACHE = "ENTITLEMENT_STATUS_CACHE"
+POOL_STATUS_CACHE = "POOL_STATUS_CACHE"
 PROD_STATUS_CACHE = "PROD_STATUS_CACHE"
 OVERRIDE_STATUS_CACHE = "OVERRIDE_STATUS_CACHE"
 CP_PROVIDER = "CP_PROVIDER"
@@ -33,9 +36,10 @@ FACTS = "FACTS"
 PROFILE_MANAGER = "PROFILE_MANAGER"
 INSTALLED_PRODUCTS_MANAGER = "INSTALLED_PRODUCTS_MANAGER"
 RELEASE_STATUS_CACHE = "RELEASE_STATUS_CACHE"
+CONTENT_ACCESS_CACHE = "CONTENT_ACCESS_CACHE"
 
 
-class FeatureBroker:
+class FeatureBroker(object):
     """
     Tracks all configured features.
 
@@ -72,10 +76,9 @@ class FeatureBroker:
         except KeyError:
             raise KeyError("Unknown feature: %r" % feature)
 
-        if isinstance(provider, (type, types.ClassType)):
-            # Args should never be used with singletons, they are ignored
-            self.providers[feature] = provider()
-        elif callable(provider):
+        if isinstance(provider, (type, six.class_types)):
+            self.providers[feature] = provider(*args, **kwargs)
+        elif six.callable(provider):
             return provider(*args, **kwargs)
 
         return self.providers[feature]
@@ -105,6 +108,6 @@ def require(feature, *args, **kwargs):
 
 def provide(feature, provider, singleton=False):
     global FEATURES
-    if not singleton and isinstance(provider, (type, types.ClassType)):
+    if not singleton and isinstance(provider, (type, six.class_types)):
         provider = nonSingleton(provider)
     return FEATURES.provide(feature, provider)

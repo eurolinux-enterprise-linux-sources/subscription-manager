@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -12,8 +14,6 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import os
 from datetime import datetime
 
@@ -34,8 +34,8 @@ from subscription_manager.gui import widgets
 from subscription_manager.gui.utils import handle_gui_exception
 from subscription_manager.utils import is_true_value
 
+from subscription_manager.i18n import ugettext as _
 
-_ = gettext.gettext
 
 prefix = os.path.dirname(__file__)
 WARNING_IMG = os.path.join(prefix, "data/icons/partial.svg")
@@ -141,7 +141,7 @@ class MySubscriptionsTab(widgets.SubscriptionManagerTab):
         if not response:
             return
 
-        serial = long(selection['serial'])
+        serial = int(selection['serial'])
 
         if self.identity.is_valid():
             self.pb = progress.Progress(_("Removing"),
@@ -269,7 +269,7 @@ class MySubscriptionsTab(widgets.SubscriptionManagerTab):
         if not serial:
             return
 
-        cert = self.entitlement_dir.find(long(serial))
+        cert = self.entitlement_dir.find(int(serial))
         if not cert:
             return
 
@@ -380,7 +380,7 @@ class MySubscriptionsTab(widgets.SubscriptionManagerTab):
         if (len(full_set) == 0):
             return 100
         else:
-            return (float(len(subset)) / len(full_set)) * 100
+            return (len(subset) / len(full_set)) * 100
 
     def _get_installed(self, products):
         installed_dir = self.product_dir

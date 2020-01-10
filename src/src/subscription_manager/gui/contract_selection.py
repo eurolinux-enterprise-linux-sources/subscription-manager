@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -12,9 +14,7 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
 import datetime
-import gettext
 import time
 
 from subscription_manager.ga import Gtk as ga_Gtk
@@ -26,7 +26,7 @@ from subscription_manager import isodate
 from subscription_manager.jsonwrapper import PoolWrapper
 from subscription_manager.managerlib import allows_multi_entitlement
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 
 class ContractSelectionWindow(widgets.SubmanBaseWidget):
@@ -214,7 +214,7 @@ class ContractSelectionWindow(widgets.SubmanBaseWidget):
             else:
                 text = col._get_false_text()
             results.append(text)
-        return cmp(results[0], results[1])
+        return self._cmp(results[0], results[1])
 
     def _sort_date(self, model, row1, row2, data):
         """
@@ -227,4 +227,12 @@ class ContractSelectionWindow(widgets.SubmanBaseWidget):
             or datetime.date(datetime.MINYEAR, 1, 1)
         epoch1 = time.mktime(date1.timetuple())
         epoch2 = time.mktime(date2.timetuple())
-        return cmp(epoch1, epoch2)
+        return self._cmp(epoch1, epoch2)
+
+    def _cmp(self, val1, val2):
+        if val1 < val2:
+            return -1
+        elif val1 == val2:
+            return 0
+        else:
+            return -1

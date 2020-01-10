@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -12,15 +14,13 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 
 from subscription_manager.gui.utils import handle_gui_exception
 from subscription_manager.gui import widgets
 from subscription_manager.injection import IDENTITY, require
 
-_ = gettext.gettext
+from subscription_manager.i18n import ugettext as _
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class RedeemDialog(widgets.SubmanBaseWidget):
         try:
             self.backend.cp_provider.get_consumer_auth_cp().activateMachine(self.identity.uuid, email)
             self.hide()
-        except Exception, e:
+        except Exception as e:
             handle_gui_exception(e,
                 _("Error redeeming subscription: %s"),
                 self.redeem_dialog)

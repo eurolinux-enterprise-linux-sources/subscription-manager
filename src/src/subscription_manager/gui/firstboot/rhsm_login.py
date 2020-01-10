@@ -1,15 +1,14 @@
+from __future__ import print_function, division, absolute_import
 
-import gettext
 import sys
 import logging
-
-_ = lambda x: gettext.ldgettext("rhsm", x)
+import dbus.mainloop.glib
 
 from subscription_manager import ga_loader
 ga_loader.init_ga()
 
 from subscription_manager.ga import Gtk as ga_Gtk
-from subscription_manager.ga import gtk_compat
+from subscription_manager.ga import gtk_compat, GLib
 
 gtk_compat.threads_init()
 
@@ -30,17 +29,16 @@ init_dep_injection()
 
 from subscription_manager import injection as inj
 
-from subscription_manager.facts import Facts
-from subscription_manager.hwprobe import Hardware
+from rhsmlib.facts.hwprobe import HardwareCollector
 from subscription_manager.gui import managergui
 from subscription_manager.gui import registergui
 from subscription_manager.gui.utils import format_exception
-from subscription_manager.i18n import configure_i18n
 
 from firstboot import module
 from firstboot import constants
 
-configure_i18n(with_glade=True)
+from subscription_manager.i18n import configure_i18n, ugettext as _
+configure_i18n()
 
 from rhsm.utils import remove_scheme
 
@@ -61,6 +59,10 @@ class moduleClass(module.Module, object):
         """
         super(moduleClass, self).__init__()
 
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+        GLib.threads_init()
+        dbus.mainloop.glib.threads_init()
+
         self.mode = constants.MODE_REGULAR
         self.title = _("Subscription Management Registration")
         self.sidebarTitle = _("Subscription Registration")
@@ -74,13 +76,13 @@ class moduleClass(module.Module, object):
         reg_info = registergui.RegisterInfo()
         self.backend = managergui.Backend()
         self.plugin_manager = inj.require(inj.PLUGIN_MANAGER)
-        self.register_widget = registergui.FirstbootWidget(self.backend, Facts(), reg_info)
+        self.register_widget = registergui.FirstbootWidget(self.backend, reg_info)
         self.register_widget.connect("notify::screen-ready", self._on_screen_ready_change)
 
         # Will be False if we are on an older RHEL version where
         # rhn-client-tools already does some things so we don't have to.
         self.standalone = True
-        distribution = Hardware().get_distribution()
+        distribution = HardwareCollector().get_distribution()
         log.debug("Distribution: %s" % str(distribution))
 
         try:
@@ -89,7 +91,7 @@ class moduleClass(module.Module, object):
             # is if this is prior to RHEL 7, so this comparison should be safe.
             if dist_version < 7:
                 self.standalone = False
-        except Exception, e:
+        except Exception as e:
             log.error("Unable to parse a distribution version.")
             log.exception(e)
         log.debug("Running standalone firstboot: %s" % self.standalone)

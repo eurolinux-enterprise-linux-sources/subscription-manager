@@ -1,13 +1,13 @@
+from __future__ import print_function, division, absolute_import
 
-
-from fixture import SubManFixture
+from .fixture import SubManFixture
 from subscription_manager.gui import networkConfig
 import mock
 import rhsm.connection as connection
 import rhsm.config
 import rhsm.utils
 import socket
-import stubs
+from . import stubs
 
 
 class TestNetworkConfigDialog(SubManFixture):
@@ -24,27 +24,27 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_entry.set_text("example.com:10000")
         expected = ('example.com', '10000')
         actual = self.nc.parse_proxy_entry(proxy_entry.get_text())
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
         proxy_entry.set_text("http://example.com")
         expected = ('example.com', '3128')
         actual = self.nc.parse_proxy_entry(proxy_entry.get_text())
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
         proxy_entry.set_text("http://user@example.com")
         expected = ('example.com', '3128')
         actual = self.nc.parse_proxy_entry(proxy_entry.get_text())
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
         proxy_entry.set_text("http://user:pass@example.com")
         expected = ('example.com', '3128')
         actual = self.nc.parse_proxy_entry(proxy_entry.get_text())
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
         proxy_entry.set_text("example.com:")
         expected = ('example.com', '3128')
         actual = self.nc.parse_proxy_entry(proxy_entry.get_text())
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @mock.patch('subscription_manager.gui.networkConfig.rhsm.utils.parse_url')
     def test_network_cfg_parse_proxy_entry_unexpected_exception(self, mock_parse_url):
@@ -54,7 +54,7 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_entry.set_text("example.com:10000")
         expected = ('example.com', '10000')
         actual = self.nc.parse_proxy_entry(proxy_entry.get_text())
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @mock.patch('subscription_manager.gui.networkConfig.rhsm.utils.parse_url')
     def test_network_cfg_parse_proxy_entry_exceptions(self, mock_parse_url):
@@ -64,7 +64,7 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_entry.set_text("example.com:")
         expected = ('example.com', rhsm.config.DEFAULT_PROXY_PORT)
         actual = self.nc.parse_proxy_entry(proxy_entry.get_text())
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     def test_network_cfg_set_initial_values(self):
         self.stubConfig = stubs.StubConfig()
@@ -117,7 +117,7 @@ class TestNetworkConfigDialog(SubManFixture):
         self.nc.proxyEntry.set_text("example.com:10000")
         self.expected = {}
         self.nc.on_cancel_clicked(self.nc.cancelButton)
-        self.assertEquals(self.expected, self.nc.cfg.store)
+        self.assertEqual(self.expected, self.nc.cfg.store)
 
     def test_network_cfg_save_change_values(self):
         self.nc = networkConfig.NetworkConfigDialog()
@@ -127,7 +127,7 @@ class TestNetworkConfigDialog(SubManFixture):
         self.nc.proxyEntry.set_text("example.com:10000")
         self.expected = {}
         self.nc.on_save_clicked(self.nc.saveButton)
-        self.assertNotEquals(self.expected, self.nc.cfg.store)
+        self.assertNotEqual(self.expected, self.nc.cfg.store)
 
     @mock.patch('subscription_manager.gui.networkConfig.connection.UEPConnection.getStatus')
     @mock.patch('subscription_manager.gui.networkConfig.socket.setdefaulttimeout')
@@ -138,10 +138,11 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_port = '10000'
         proxy_user = ''
         proxy_password = ''
-        self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password)
+        no_proxy = ''
+        self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy)
         expected = [mock.call(10), mock.call(self.nc.org_timeout)]
         actual = mock_setdefaulttimeout.call_args_list
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @mock.patch('subscription_manager.gui.networkConfig.connection.UEPConnection.getStatus')
     @mock.patch('subscription_manager.gui.networkConfig.socket.setdefaulttimeout')
@@ -154,9 +155,10 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_port = '10000'
         proxy_user = ''
         proxy_password = ''
-        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password)
+        no_proxy = ''
+        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy)
         expected = True
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @mock.patch('subscription_manager.gui.networkConfig.connection.UEPConnection.getStatus')
     @mock.patch('subscription_manager.gui.networkConfig.socket.setdefaulttimeout')
@@ -171,10 +173,11 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_port = '10000'
         proxy_user = ''
         proxy_password = ''
-        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password)
+        no_proxy = ''
+        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy)
 
         expected = True
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @mock.patch('subscription_manager.gui.networkConfig.connection.UEPConnection.getStatus')
     @mock.patch('subscription_manager.gui.networkConfig.socket.setdefaulttimeout')
@@ -188,10 +191,11 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_port = '10000'
         proxy_user = ''
         proxy_password = ''
-        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password)
+        no_proxy = ''
+        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy)
 
         expected = True
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @mock.patch('subscription_manager.gui.networkConfig.connection.UEPConnection.getStatus')
     @mock.patch('subscription_manager.gui.networkConfig.socket.setdefaulttimeout')
@@ -206,10 +210,11 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_port = '10000'
         proxy_user = ''
         proxy_password = ''
-        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password)
+        no_proxy = ''
+        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy)
 
         expected = False
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @mock.patch('subscription_manager.gui.networkConfig.connection.UEPConnection.getStatus')
     @mock.patch('subscription_manager.gui.networkConfig.socket.setdefaulttimeout')
@@ -223,10 +228,11 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_port = '10000'
         proxy_user = ''
         proxy_password = ''
-        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password)
+        no_proxy = ''
+        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy)
 
         expected = False
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @mock.patch('subscription_manager.gui.networkConfig.connection.UEPConnection.getStatus')
     @mock.patch('subscription_manager.gui.networkConfig.socket.setdefaulttimeout')
@@ -239,24 +245,25 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_port = '10000'
         proxy_user = ''
         proxy_password = ''
-        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password)
+        no_proxy = ''
+        actual = self.nc.test_connection(proxy_host, proxy_port, proxy_user, proxy_password, no_proxy)
 
         expected = False
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     def test_network_cfg_on_connection_finish(self):
         connection_status_label = self.nc.connectionStatusLabel
         expected = "Proxy connection succeeded"
         self.nc.on_test_connection_finish(True)
         actual = connection_status_label.get_text()
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     def test_network_cfg_on_connection_finish_fail(self):
         connection_status_label = self.nc.connectionStatusLabel
         expected = "Proxy connection failed"
         self.nc.on_test_connection_finish(False)
         actual = connection_status_label.get_text()
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     def test_network_cfg_show(self):
         self.nc.show()
@@ -273,7 +280,7 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_password_entry.set_text("redhatPass")
         test_connection_button = self.nc.testConnectionButton
         self.nc.on_test_connection_clicked(test_connection_button)
-        expected = mock.call(args=('example.com', '10000', 'redhatUser', 'redhatPass'),
+        expected = mock.call(args=('example.com', '10000', 'redhatUser', 'redhatPass', None),
                              name=mock.ANY, target=mock.ANY)
         actual = mock_thread.call_args_list
 
@@ -291,6 +298,6 @@ class TestNetworkConfigDialog(SubManFixture):
         proxy_password_entry.set_text("redhatPass")
         test_connection_button = self.nc.testConnectionButton
         self.nc.on_test_connection_clicked(test_connection_button)
-        expected = mock.call(args=('example.com', '10000', None, None), name=mock.ANY, target=mock.ANY)
+        expected = mock.call(args=('example.com', '10000', None, None, None), name=mock.ANY, target=mock.ANY)
         actual = mock_thread.call_args_list
         self.assertTrue(expected in actual)

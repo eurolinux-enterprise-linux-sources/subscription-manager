@@ -1,31 +1,37 @@
-# Prefer systemd over sysv on Fedora 17+ and RHEL 7+
-%global use_systemd (0%{?fedora} && 0%{?fedora} >= 17) || (0%{?rhel} && 0%{?rhel} >= 7)
+# Prefer systemd over sysv on Fedora and RHEL 7+
+%global use_systemd 0%{?fedora} || (0%{?rhel} && 0%{?rhel} >= 7) || (0%{?suse_version} && 0%{?suse_version} >= 1315)
 # For optional building of ostree-plugin sub package. Unrelated to systemd
 # but the same versions apply at the moment.
-%global has_ostree %use_systemd
-%global use_firstboot 0
+%global has_ostree %use_systemd && 0%{?suse_version} == 0
 %global use_initial_setup 1
+%global use_firstboot 0
+%global use_kitchen 1
+%global use_inotify 1
+%global use_python3 0%{?fedora}
 %global rhsm_plugins_dir  /usr/share/rhsm-plugins
-%global use_gtk3 %use_systemd
+# on recent Fedora and RHEL 7, let's not use m2crypto
+%global use_m2crypto (0%{?fedora} < 23 && 0%{?rhel} < 7)
 
-%if 0%{?rhel} == 7
-%global use_initial_setup 1
-%global use_firstboot 0
+# SLES 11 and RHEL6 don't have macros defined for python2; just "python".  Alias them.
+%{!?__python2:%global __python2 %__python}
+%{!?python2_sitearch:%global python2_sitearch %python_sitearch}
+%{?python_provide:%python_provide python-rhsm}
+
+%if %{use_systemd}
+# Note that %gtk3 will be undefined if it's not used
+%global gtk3 1
 %endif
 
-# 6 < rhel < 7
-%if 0%{?rhel} == 6
+%if 0%{?rhel} == 6 || 0%{?suse_version}
 %global use_initial_setup 0
 %global use_firstboot 1
+%global use_kitchen 0
+%global use_inotify 0
 %endif
 
-# SLES
-%if 0%{?sles_version}
-%global use_initial_setup 0
-%global use_firstboot 1
-%endif
-
-%global use_dnf (0%{?fedora} && 0%{?fedora} >= 22)
+%global use_dnf 0%{?fedora}
+%global use_yum (0%{?rhel} && 0%{?rhel} <= 7) || (0%{?suse_version})
+%global use_cockpit 0%{?fedora} || 0%{?rhel} >= 7
 
 %global _hardened_build 1
 %{!?__global_ldflags: %global __global_ldflags -Wl,-z,relro -Wl,-z,now}
@@ -37,7 +43,7 @@
 %endif
 
 # makefile will guess, but be specific.
-%if %{use_gtk3}
+%if 0%{?gtk3}
 %define gtk_version GTK_VERSION=3
 %else
 %define gtk_version GTK_VERSION=2
@@ -49,8 +55,11 @@
 %define post_boot_tool INSTALL_INITIAL_SETUP=false INSTALL_FIRSTBOOT=true
 %endif
 
-# makefile defaults to INSTALL_YUM_PLUGIN=true
-%define install_yum_plugins INSTALL_YUM_PLUGINS=true
+%if 0%{?suse_version}
+%define install_zypper_plugins INSTALL_ZYPPER_PLUGINS=true
+%else
+%define install_zypper_plugins INSTALL_ZYPPER_PLUGINS=false
+%endif
 
 # makefile defaults to INSTALL_DNF_PLUGIN=false
 %if %{use_dnf}
@@ -59,9 +68,22 @@
 %define install_dnf_plugins INSTALL_DNF_PLUGINS=false
 %endif
 
+# makefile defaults to INSTALL_DNF_PLUGIN=true
+%if %{use_yum}
+%define install_yum_plugins INSTALL_YUM_PLUGINS=true
+%else
+%define install_yum_plugins INSTALL_YUM_PLUGINS=false
+%endif
+
+%if %{use_systemd}
+%define with_systemd WITH_SYSTEMD=true
+%else
+%define with_systemd WITH_SYSTEMD=false
+%endif
+
 Name: subscription-manager
-Version: 1.18.10
-Release: 1%{?dist}
+Version: 1.20.10
+Release: 7%{?dist}
 Summary: Tools and libraries for subscription and repository management
 Group:   System Environment/Base
 License: GPLv2
@@ -73,38 +95,52 @@ URL:     http://www.candlepinproject.org/
 # yum install tito
 # tito build --tag subscription-manager-$VERSION-$RELEASE --tgz
 Source0: %{name}-%{version}.tar.gz
+# this is a little different from the Source0, because of limitations in tito,
+# namely that tito expects only one source tarball
+Source1: %{name}-cockpit-%{version}.tar.gz
+%if 0%{?suse_version}
+Source2: subscription-manager-rpmlintrc
+%endif
+
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+
+# A note about the %{?foo:bar} %{!?foo:quux} convention.  The %{?foo:bar}
+# syntax evaluates foo and if it is **defined**, it expands to "bar" otherwise it
+# expands to nothing.  The %{!?foo:quux} syntax similarily only the expansion
+# occurs when foo is **undefined**.  Since one and only one of the expressions will
+# expand we can more concisely handle when a dependency has different names in
+# SUSE versus RHEL.  The traditional if syntax gets extremely confusing when
+# nesting is required since RPM requires the various preamble directives to be
+# at the start of a line making meaningful indentation impossible.
 
 Requires:  python-ethtool
 Requires:  python-iniparse
-Requires:  virt-what
-Requires:  python-rhsm >= 1.18.1
 Requires:  python-decorator
-
-%if 0%{?sles_version}
-Requires:  dbus-1-python
-%else
-Requires:  dbus-python
-%endif
-Requires:  yum >= 3.2.29-73
-%if !0%{?sles_version}
-Requires:  usermode
-%endif
+Requires:  virt-what
+Requires:  subscription-manager-rhsm = %{version}
+Requires:  python-decorator
+Requires:  python-six
 Requires:  python-dateutil
-%if %use_gtk3
-Requires: gobject-introspection
-Requires: pygobject3-base
-%else
-%if 0%{?sles_version}
-Requires:  python-gobject2
-%else
-Requires:  pygobject2
-%endif
-%endif
 
+Requires: %{?suse_version:dbus-1-python} %{!?suse_version:dbus-python}
+Requires: %{?suse_version:aaa_base} %{!?suse_version:chkconfig}
+Requires: %{?suse_version:yum} %{!?suse_version:yum >= 3.2.29-73}
+
+# Support GTK2 and GTK3 on both SUSE and RHEL...
+%if 0%{?suse_version}
+Requires: %{?gtk3:python-gobject} %{!?gtk3:python-gobject2, libzypp, zypp-plugin-python, python-zypp}
+%else
+Requires:  usermode
+Requires:  %{?gtk3:gobject-introspection, pygobject3-base} %{!?gtk3:pygobject2}
 # There's no dmi to read on these arches, so don't pull in this dep.
+# Additionally, dmidecode isn't packaged at all on SUSE
 %ifnarch ppc ppc64 s390 s390x
 Requires:  python-dmidecode
+%endif
+%endif
+
+%if %use_inotify
+Requires:  python-inotify
 %endif
 
 %if %use_systemd
@@ -112,14 +148,8 @@ Requires(post): systemd
 Requires(preun): systemd
 Requires(postun): systemd
 %else
-%if 0%{?sles_version}
-Requires(post): aaa_base
-Requires(preun): aaa_base
-%else
-Requires(post): chkconfig
-Requires(preun): chkconfig
-Requires(preun): initscripts
-%endif
+Requires(post): %{?suse_version:aaa_base} %{!?suse_version:chkconfig}
+Requires(preun): %{?suse_version:aaa_base} %{!?suse_version:chkconfig, initscripts}
 %endif
 
 BuildRequires: python-devel
@@ -128,24 +158,32 @@ BuildRequires: gettext
 BuildRequires: intltool
 BuildRequires: libnotify-devel
 BuildRequires: desktop-file-utils
-%if 0%{?fedora} || 0%{?rhel}
-BuildRequires: redhat-lsb
+BuildRequires: python-six
+
+BuildRequires: %{?suse_version:dbus-1-glib-devel} %{!?suse_version:dbus-glib-devel}
+BuildRequires: %{?suse_version:lsb-release, distribution-release} %{!?suse_version:redhat-lsb}
+BuildRequires: %{?suse_version:gconf2-devel} %{!?suse_version:GConf2-devel}
+BuildRequires: %{?suse_version:update-desktop-files} %{!?suse_version:scrollkeeper}
+
+BuildRequires: %{?gtk3:gtk3-devel} %{!?gtk3:gtk2-devel}
+
+%if 0%{?suse_version}
+BuildRequires: libzypp
 %endif
-BuildRequires: scrollkeeper
-%if 0%{?sles_version}
-BuildRequires: gconf2-devel
-%else
-BuildRequires: GConf2-devel
+
+%if 0%{?suse_version} >= 1210
+BuildRequires: systemd-rpm-macros
 %endif
-%if %use_gtk3
-BuildRequires: gtk3-devel
-%else
-BuildRequires: gtk2-devel
-%endif
+
 %if %use_systemd
 # We need the systemd RPM macros
 BuildRequires: systemd
 %endif
+
+# The %{?something:foo} expands to foo only when something is **defined**.  Likewise the
+# %{!?something:foo} expands only when something is **not defined**.
+BuildRequires: %{?suse_version:python-devel >= 2.6} %{!?suse_version:python2-devel}
+BuildRequires: openssl-devel
 
 %description
 The Subscription Manager package provides programs and libraries to allow users
@@ -154,7 +192,7 @@ platform.
 
 
 %package -n subscription-manager-plugin-container
-Summary: A plugin for handling container content.
+Summary: A plugin for handling container content
 Group: System Environment/Base
 Requires: %{name} = %{version}-%{release}
 
@@ -169,17 +207,20 @@ Group: System Environment/Base
 Requires: %{name} = %{version}-%{release}
 
 # We need pygtk3 and gtk2 until rhsm-icon is ported to gtk3
-%if %use_gtk3
-Requires: pygobject3
-Requires: gtk3
-%else
-Requires: pygtk2 pygtk2-libglade
-%endif
+Requires: %{?gtk3:pygobject3, gtk3} %{!?gtk3:pygtk2, pygtk2-libglade}
 Requires: usermode-gtk
-Requires: dbus-x11
 Requires: gnome-icon-theme
+
+%if 0%{?gtk3}
+Requires: font(cantarell)
+%else
+Requires: %{?suse_version:dejavu} %{!?suse_version:dejavu-sans-fonts}
+%endif
+
+%if !0%{?suse_version}
 Requires(post): scrollkeeper
 Requires(postun): scrollkeeper
+%endif
 
 # Renamed from -gnome, so obsolete it properly
 Obsoletes: %{name}-gnome < 1.0.3-1
@@ -218,6 +259,7 @@ Summary: Subscription Manager plugins for DNF
 Group: System Environment/Base
 Requires: %{name} = %{version}-%{release}
 Requires: dnf >= 1.0.0
+Requires: python2-dnf-plugins-core
 
 %description -n dnf-plugin-subscription-manager
 This package provides plugins to interact with repositories and subscriptions
@@ -271,6 +313,79 @@ the remote in the currently deployed .origin file.
 %endif
 
 
+%package -n subscription-manager-rhsm
+Summary: A Python library to communicate with a Red Hat Unified Entitlement Platform
+Group: Development/Libraries
+
+%if %use_m2crypto
+Requires: %{?suse_version:python-m2crypto} %{!?suse_version:m2crypto}
+%endif
+Requires: python-dateutil
+Requires: python-iniparse
+# rpm-python is an old name for python2-rpm but RHEL6 uses the old name
+Requires: rpm-python
+Requires: python-six
+Requires: subscription-manager-rhsm-certificates = %{version}-%{release}
+Provides: python-rhsm = %{version}-%{release}
+Obsoletes: python-rhsm <= 1.20.3-1
+
+%description -n subscription-manager-rhsm
+A small library for communicating with the REST interface of a Red Hat Unified
+Entitlement Platform. This interface is used for the management of system
+entitlements, certificates, and access to content.
+
+
+%if %{use_python3}
+%package -n python3-subscription-manager-rhsm
+Summary: A Python library to communicate with a Red Hat Unified Entitlement Platform
+BuildRequires: python3-devel
+BuildRequires: python3-setuptools
+BuildRequires: python3-six
+
+Requires: python3-dateutil
+Requires: python3-iniparse
+Requires: python3-rpm
+Requires: python3-six
+# M2Crypto isn't even used in new Fedoras and RHEL 8
+Requires: subscription-manager-rhsm-certificates = %{version}-%{release}
+Provides: python3-python-rhsm = %{version}-%{release}
+Obsoletes: python3-python-rhsm <= 1.20.3-1
+
+# Required by Fedora packaging guidelines
+%{?python_provide:%python_provide python3-python-rhsm}
+
+%description -n python3-subscription-manager-rhsm
+A small library for communicating with the REST interface of a Red Hat Unified
+Entitlement Platform. This interface is used for the management of system
+entitlements, certificates, and access to content.
+%endif
+
+
+%package -n subscription-manager-rhsm-certificates
+Summary: Certificates required to communicate with a Red Hat Unified Entitlement Platform
+Group: Development/Libraries
+Provides: python-rhsm-certificates = %{version}-%{release}
+Obsoletes: python-rhsm-certificates <= 1.20.3-1
+
+%description -n subscription-manager-rhsm-certificates
+This package contains certificates required for communicating with the REST interface
+of a Red Hat Unified Entitlement Platform, used for the management of system entitlements
+and to receive access to content.
+
+%if %use_cockpit
+%package -n subscription-manager-cockpit
+Summary: Subscription Manager Cockpit UI
+License: LGPLv2+
+BuildArch: noarch
+
+Requires: subscription-manager
+Requires: cockpit-bridge
+Requires: cockpit-shell
+
+%description -n subscription-manager-cockpit
+Subscription Manager Cockpit UI
+%endif
+
 %prep
 %setup -q
 
@@ -281,10 +396,27 @@ make -f Makefile VERSION=%{version}-%{release} CFLAGS="%{optflags}" \
 %install
 rm -rf %{buildroot}
 make -f Makefile install VERSION=%{version}-%{release} \
-    PREFIX=%{buildroot} PYTHON_SITELIB=%{python_sitelib} \
-    OS_VERSION=%{?fedora}%{?rhel}%{?sles_version} OS_DIST=%{dist} \
+    PYTHON=/usr/bin/python2 \
+    PREFIX=%{buildroot} PYTHON_SITELIB=%{python_sitearch} \
+    OS_VERSION=%{?fedora}%{?rhel}%{?suse_version} OS_DIST=%{dist} \
     %{?install_ostree} %{?post_boot_tool} %{?gtk_version} \
-    %{?install_yum_plugins} %{?install_dnf_plugins}
+    %{?install_yum_plugins} %{?install_dnf_plugins} \
+    %{?install_zypper_plugins} \
+    %{?with_systemd}
+%if %{use_python3}
+make -f Makefile install VERSION=%{version}-%{release} \
+    PYTHON=/usr/bin/python3 \
+    PREFIX=%{buildroot} PYTHON_SITELIB=%{python3_sitearch} \
+    OS_VERSION=%{?fedora}%{?rhel}%{?suse_version} OS_DIST=%{dist} \
+    %{?install_ostree} %{?post_boot_tool} %{?gtk_version} \
+    %{?install_yum_plugins} %{?install_dnf_plugins} \
+    %{?install_zypper_plugins} \
+    %{?with_systemd}
+%endif
+
+%if 0%{?suse_version}
+%suse_update_desktop_file -n -r subscription-manager-gui Settings PackageManager
+%endif
 
 desktop-file-validate %{buildroot}/etc/xdg/autostart/rhsm-icon.desktop
 desktop-file-validate %{buildroot}/usr/share/applications/subscription-manager-gui.desktop
@@ -296,8 +428,10 @@ desktop-file-validate %{buildroot}/usr/share/applications/subscription-manager-g
 find %{buildroot} -name \*.py -exec touch -r %{SOURCE0} '{}' \;
 
 # fake out the redhat.repo file
-%{__mkdir} %{buildroot}%{_sysconfdir}/yum.repos.d
-touch %{buildroot}%{_sysconfdir}/yum.repos.d/redhat.repo
+%if %{use_yum} || %{use_dnf}
+    %{__mkdir} %{buildroot}%{_sysconfdir}/yum.repos.d
+    touch %{buildroot}%{_sysconfdir}/yum.repos.d/redhat.repo
+%endif
 
 # fake out the certificate directories
 %{__mkdir_p} %{buildroot}%{_sysconfdir}/pki/consumer
@@ -310,6 +444,12 @@ install -m 644 %{_builddir}/%{buildsubdir}/etc-conf/redhat-entitlement-authority
 
 %{__mkdir_p} %{buildroot}%{_sysconfdir}/etc/rhsm/ca
 install -m 644 %{_builddir}/%{buildsubdir}/etc-conf/redhat-entitlement-authority.pem %{buildroot}/%{_sysconfdir}/rhsm/ca/redhat-entitlement-authority.pem
+install -m 644 %{_builddir}/%{buildsubdir}/etc-conf/ca/redhat-uep.pem %{buildroot}/%{_sysconfdir}/rhsm/ca/redhat-uep.pem
+
+%if %use_cockpit
+    # install cockpit dist targz
+    tar --strip-components=1 -xzf %{SOURCE1} -C %{buildroot}
+%endif
 
 %clean
 rm -rf %{buildroot}
@@ -319,10 +459,46 @@ rm -rf %{buildroot}
 # gnome-help tools use domain 'subscription-manager'
 %files -f rhsm.lang
 %defattr(-,root,root,-)
+%if 0%{?suse_version}
+%dir %{_sysconfdir}/pki
+
+%if %{use_yum}
+    %dir %{_sysconfdir}/yum
+    %dir %{_sysconfdir}/yum/pluginconf.d
+    %dir %{_prefix}/lib/yum-plugins/
+%endif
+
+%if %{use_yum} || %{use_dnf}
+    %dir %{_sysconfdir}/yum.repos.d
+%endif
+
+%dir %{python_sitearch}/rhsmlib/candlepin
+%dir %{python_sitearch}/rhsmlib/compat
+%dir %{python_sitearch}/rhsmlib/dbus
+%dir %{python_sitearch}/rhsmlib/dbus/facts
+%dir %{python_sitearch}/rhsmlib/dbus/objects
+%dir %{python_sitearch}/rhsmlib/facts
+%dir %{python_sitearch}/rhsmlib/services
+%dir %{python_sitearch}/subscription_manager-%{version}-*.egg-info
+%dir %{python_sitearch}/subscription_manager/api
+%dir %{python_sitearch}/subscription_manager/branding
+%dir %{python_sitearch}/subscription_manager/model
+%dir %{python_sitearch}/subscription_manager/plugin
+%if %{use_python3}
+%exclude %{python3_sitearch}/rhsmlib
+%endif
+%dir %{_var}/spool/rhsm
+%dir %{_prefix}/share/polkit-1
+%dir %{_prefix}/share/polkit-1/actions
+%endif
+%if 0%{?suse_version} && 0%{?suse_version} < 1315
+%dir %{_prefix}/share/locale/ta_IN
+%dir %{_prefix}/share/locale/ta_IN/LC_MESSAGES
+%endif
 %attr(755,root,root) %{_sbindir}/subscription-manager
 
 # symlink to console-helper
-%if !0%{?sles_version}
+%if !0%{?suse_version}
 %{_bindir}/subscription-manager
 %endif
 %attr(755,root,root) %{_bindir}/rhsmcertd
@@ -330,42 +506,39 @@ rm -rf %{buildroot}
 %attr(755,root,root) %{_libexecdir}/rhsmcertd-worker
 %attr(755,root,root) %{_libexecdir}/rhsmd
 
-# init scripts and systemd services
-%if %use_systemd
-    %attr(644,root,root) %{_unitdir}/rhsmcertd.service
-    %attr(644,root,root) %{_tmpfilesdir}/%{name}.conf
-%else
-    %attr(755,root,root) %{_initrddir}/rhsmcertd
-%endif
-
 # our config dirs and files
 %attr(755,root,root) %dir %{_sysconfdir}/pki/consumer
 %attr(755,root,root) %dir %{_sysconfdir}/pki/entitlement
 %attr(755,root,root) %dir %{_sysconfdir}/rhsm
 %attr(755,root,root) %dir %{_sysconfdir}/rhsm/facts
+%if 0%{?suse_version}
+%attr(755,root,root) %dir %{_sysconfdir}/rhsm/zypper.repos.d
+%endif
+
 %attr(644,root,root) %config(noreplace) %{_sysconfdir}/rhsm/rhsm.conf
 %config %attr(644,root,root) %{_sysconfdir}/rhsm/logging.conf
 
-%config(noreplace) %{_sysconfdir}/dbus-1/system.d/com.redhat.SubscriptionManager.conf
-
 # PAM config
-%if !0%{?sles_version}
+%if !0%{?suse_version}
 %{_sysconfdir}/pam.d/subscription-manager
 %{_sysconfdir}/security/console.apps/subscription-manager
 %endif
 
-# remove the repo file when we are deleted
-%ghost %{_sysconfdir}/yum.repos.d/redhat.repo
+%if %{use_yum} || %{use_dnf}
+    %ghost %{_sysconfdir}/yum.repos.d/redhat.repo
+%endif
 
 # yum plugin config
-%config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/subscription-manager.conf
-%config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/product-id.conf
-%config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/search-disabled-repos.conf
+%if %{use_yum}
+    # remove the repo file when we are deleted
+    %config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/subscription-manager.conf
+    %config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/product-id.conf
+    %config(noreplace) %attr(644,root,root) %{_sysconfdir}/yum/pluginconf.d/search-disabled-repos.conf
+%endif
 
 # misc system config
 %config(noreplace) %attr(644,root,root) %{_sysconfdir}/logrotate.d/subscription-manager
 %attr(700,root,root) %{_sysconfdir}/cron.daily/rhsmd
-%{_datadir}/dbus-1/system-services/com.redhat.SubscriptionManager.service
 
 %attr(755,root,root) %dir %{_var}/log/rhsm
 %attr(755,root,root) %dir %{_var}/spool/rhsm/debug
@@ -374,6 +547,7 @@ rm -rf %{buildroot}
 %attr(750,root,root) %dir %{_var}/lib/rhsm/facts
 %attr(750,root,root) %dir %{_var}/lib/rhsm/packages
 %attr(750,root,root) %dir %{_var}/lib/rhsm/cache
+%attr(750,root,root) %dir %{_var}/lib/rhsm/repo_server_val
 
 %{_sysconfdir}/bash_completion.d/subscription-manager
 %{_sysconfdir}/bash_completion.d/rct
@@ -382,30 +556,29 @@ rm -rf %{buildroot}
 %{_sysconfdir}/bash_completion.d/rhsm-icon
 %{_sysconfdir}/bash_completion.d/rhsmcertd
 
-%dir %{python_sitelib}/
-%dir %{python_sitelib}/subscription_manager
-%dir %{python_sitelib}/subscription_manager/api
-%dir %{python_sitelib}/subscription_manager/branding
-%dir %{python_sitelib}/subscription_manager/model
-%dir %{python_sitelib}/subscription_manager/plugin
+%dir %{python_sitearch}/subscription_manager
 
 # code, python modules and packages
-%{python_sitelib}/subscription_manager-*.egg-info/*
-%{python_sitelib}/subscription_manager/*.py*
-%{python_sitelib}/subscription_manager/api/*.py*
-%{python_sitelib}/subscription_manager/branding/*.py*
-%{python_sitelib}/subscription_manager/model/*.py*
-%{python_sitelib}/subscription_manager/plugin/*.py*
+%{python_sitearch}/subscription_manager-*.egg-info/*
+%{python_sitearch}/subscription_manager/*.py*
+%{python_sitearch}/subscription_manager/api/*.py*
+%{python_sitearch}/subscription_manager/branding/*.py*
+%{python_sitearch}/subscription_manager/model/*.py*
+%{python_sitearch}/subscription_manager/plugin/__init__.py*
+%if %{use_python3}
+%exclude %{python3_sitearch}/subscription_manager-*.egg-info/*
+%exclude %{python3_sitearch}/subscription_manager
+%endif
 
 # our gtk2/gtk3 compat modules
-%dir %{python_sitelib}/subscription_manager/ga_impls
-%{python_sitelib}/subscription_manager/ga_impls/__init__.py*
+%dir %{python_sitearch}/subscription_manager/ga_impls
+%{python_sitearch}/subscription_manager/ga_impls/__init__.py*
 
-%if %use_gtk3
-%{python_sitelib}/subscription_manager/ga_impls/ga_gtk3.py*
+%if 0%{?gtk3}
+%{python_sitearch}/subscription_manager/ga_impls/ga_gtk3.py*
 %else
-%dir %{python_sitelib}/subscription_manager/ga_impls/ga_gtk2
-%{python_sitelib}/subscription_manager/ga_impls/ga_gtk2/*.py*
+%dir %{python_sitearch}/subscription_manager/ga_impls/ga_gtk2
+%{python_sitearch}/subscription_manager/ga_impls/ga_gtk2/*.py*
 %endif
 
 # subscription-manager plugins
@@ -415,18 +588,59 @@ rm -rf %{buildroot}
 # yum plugins
 # Using _prefix + lib here instead of libdir as that evaluates to /usr/lib64 on x86_64,
 # but yum plugins seem to normally be sent to /usr/lib/:
-%{_prefix}/lib/yum-plugins/subscription-manager.py*
-%{_prefix}/lib/yum-plugins/product-id.py*
-%{_prefix}/lib/yum-plugins/search-disabled-repos.py*
+%if %{use_yum}
+    %{_prefix}/lib/yum-plugins/subscription-manager.py*
+    %{_prefix}/lib/yum-plugins/product-id.py*
+    %{_prefix}/lib/yum-plugins/search-disabled-repos.py*
+%endif
+
+# zypper plugins
+%if 0%{?suse_version}
+%{_prefix}/lib/zypp/plugins/services/subscription-manager
+%{_prefix}/lib/zypp/plugins/commit/product-id
+%endif
+
+# rhsmlib
+%dir %{python_sitearch}/rhsmlib
+%{python_sitearch}/rhsmlib/*.py*
+%{python_sitearch}/rhsmlib/candlepin/*.py*
+%{python_sitearch}/rhsmlib/compat/*.py*
+%{python_sitearch}/rhsmlib/facts/*.py*
+%{python_sitearch}/rhsmlib/services/*.py*
+%{python_sitearch}/rhsmlib/dbus/*.py*
+%{python_sitearch}/rhsmlib/dbus/facts/*.py*
+%{python_sitearch}/rhsmlib/dbus/objects/*.py*
+%if %{use_python3}
+%exclude %{python3_sitearch}/rhsmlib
+%endif
+
+%{_datadir}/polkit-1/actions/com.redhat.*.policy
+%{_datadir}/dbus-1/system-services/com.redhat.*.service
+%attr(755,root,root) %{_libexecdir}/rhsm*-service
+
+# Despite the name similarity dbus-1/system.d has nothing to do with systemd
+%config(noreplace) %{_sysconfdir}/dbus-1/system.d/com.redhat.*.conf
+%if %use_systemd
+    %attr(644,root,root) %{_unitdir}/*.service
+    %attr(644,root,root) %{_tmpfilesdir}/%{name}.conf
+%else
+    %attr(755,root,root) %{_initrddir}/rhsmcertd
+%endif
 
 # Incude rt CLI tool
-%dir %{python_sitelib}/rct
-%{python_sitelib}/rct/*.py*
+%dir %{python_sitearch}/rct
+%{python_sitearch}/rct/*.py*
+%if %{use_python3}
+%exclude %{python3_sitearch}/rct
+%endif
 %attr(755,root,root) %{_bindir}/rct
 
 # Include consumer debug CLI tool
-%dir %{python_sitelib}/rhsm_debug
-%{python_sitelib}/rhsm_debug/*.py*
+%dir %{python_sitearch}/rhsm_debug
+%{python_sitearch}/rhsm_debug/*.py*
+%if %{use_python3}
+%exclude %{python3_sitearch}/rhsm_debug
+%endif
 %attr(755,root,root) %{_bindir}/rhsm-debug
 
 %doc
@@ -441,22 +655,26 @@ rm -rf %{buildroot}
 %files -n subscription-manager-gui -f subscription-manager.lang
 %defattr(-,root,root,-)
 %attr(755,root,root) %{_sbindir}/subscription-manager-gui
+%if 0%{?suse_version}
+%dir %{python_sitearch}/subscription_manager/gui/data
+%dir %{python_sitearch}/subscription_manager/gui/data/glade
+%dir %{python_sitearch}/subscription_manager/gui/data/icons
+%dir %{python_sitearch}/subscription_manager/gui/data/ui
+%dir %{_datadir}/appdata
+%dir %{_datadir}/gnome
+%dir %{_datadir}/gnome/help
+%dir %{_datadir}/omf
+%else
 # symlink to console-helper
-%if !0%{?sles_version}
 %{_bindir}/subscription-manager-gui
 %endif
 %{_bindir}/rhsm-icon
 
-%dir %{python_sitelib}/subscription_manager/gui
-%dir %{python_sitelib}/subscription_manager/gui/data
-%dir %{python_sitelib}/subscription_manager/gui/data/ui
-%dir %{python_sitelib}/subscription_manager/gui/data/glade
-%dir %{python_sitelib}/subscription_manager/gui/data/icons
-
-%{python_sitelib}/subscription_manager/gui/*.py*
-%{python_sitelib}/subscription_manager/gui/data/ui/*.ui
-%{python_sitelib}/subscription_manager/gui/data/glade/*.glade
-%{python_sitelib}/subscription_manager/gui/data/icons/*.svg
+%dir %{python_sitearch}/subscription_manager/gui
+%{python_sitearch}/subscription_manager/gui/*.py*
+%{python_sitearch}/subscription_manager/gui/data/ui/*.ui
+%{python_sitearch}/subscription_manager/gui/data/glade/*.glade
+%{python_sitearch}/subscription_manager/gui/data/icons/*.svg
 
 %{_datadir}/applications/subscription-manager-gui.desktop
 %{_datadir}/icons/hicolor/16x16/apps/*.png
@@ -471,7 +689,7 @@ rm -rf %{buildroot}
 
 # gui system config files
 %{_sysconfdir}/xdg/autostart/rhsm-icon.desktop
-%if !0%{?sles_version}
+%if !0%{?suse_version}
 %{_sysconfdir}/pam.d/subscription-manager-gui
 %{_sysconfdir}/security/console.apps/subscription-manager-gui
 %endif
@@ -485,23 +703,30 @@ rm -rf %{buildroot}
 
 %files -n subscription-manager-migration
 %defattr(-,root,root,-)
-%dir %{python_sitelib}/subscription_manager/migrate
-%{python_sitelib}/subscription_manager/migrate/*.py*
+%dir %{python_sitearch}/subscription_manager/migrate
+%{python_sitearch}/subscription_manager/migrate/*.py*
 %attr(755,root,root) %{_sbindir}/rhn-migrate-classic-to-rhsm
 
 %doc
 %{_mandir}/man8/rhn-migrate-classic-to-rhsm.8*
 %doc LICENSE
-%if 0%{?fedora} > 14
+%if 0%{?fedora}
 %doc README.Fedora
 %endif
 
 
 %files -n subscription-manager-plugin-container
 %defattr(-,root,root,-)
+%if 0%{?suse_version}
+%dir %{_sysconfdir}/docker
+%dir %{_sysconfdir}/docker/certs.d
+%dir %{_sysconfdir}/rhsm/ca
+%dir %{python_sitearch}/subscription_manager/plugin
+%endif
 %{_sysconfdir}/rhsm/pluginconf.d/container_content.ContainerContentPlugin.conf
 %{rhsm_plugins_dir}/container_content.py*
-%{python_sitelib}/subscription_manager/plugin/container.py*
+%{python_sitearch}/subscription_manager/plugin/container.py*
+
 # Copying Red Hat CA cert into each directory:
 %attr(755,root,root) %dir %{_sysconfdir}/docker/certs.d/cdn.redhat.com
 %attr(644,root,root) %{_sysconfdir}/rhsm/ca/redhat-entitlement-authority.pem
@@ -513,7 +738,7 @@ rm -rf %{buildroot}
 %defattr(-,root,root,-)
 %{_sysconfdir}/rhsm/pluginconf.d/ostree_content.OstreeContentPlugin.conf
 %{rhsm_plugins_dir}/ostree_content.py*
-%{python_sitelib}/subscription_manager/plugin/ostree/*.py*
+%{python_sitearch}/subscription_manager/plugin/ostree/*.py*
 %endif
 
 
@@ -521,10 +746,6 @@ rm -rf %{buildroot}
 %files -n subscription-manager-initial-setup-addon
 %defattr(-,root,root,-)
 %dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/
-%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/
-%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/spokes/
-%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/categories/
-%dir %{_datadir}/anaconda/addons/com_redhat_subscription_manager/ks/
 %{_datadir}/anaconda/addons/com_redhat_subscription_manager/*.py*
 %{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/*.py*
 %{_datadir}/anaconda/addons/com_redhat_subscription_manager/gui/spokes/*.ui
@@ -537,6 +758,11 @@ rm -rf %{buildroot}
 %if %use_firstboot
 %files -n subscription-manager-firstboot
 %defattr(-,root,root,-)
+%if 0%{?suse_version}
+%dir %{_datadir}/rhn
+%dir %{_datadir}/rhn/up2date_client
+%dir %{_datadir}/rhn/up2date_client/firstboot
+%endif
 %{_datadir}/rhn/up2date_client/firstboot/rhsm_login.py*
 %endif
 
@@ -544,15 +770,58 @@ rm -rf %{buildroot}
 %if %use_dnf
 %files -n dnf-plugin-subscription-manager
 %defattr(-,root,root,-)
-%{python_sitelib}/dnf-plugins/*
+%{python_sitearch}/dnf-plugins/*
+%if %{use_python3}
+%exclude %{python3_sitearch}/dnf-plugins/*
+%endif
 %endif
 
 
+%files -n subscription-manager-rhsm
+%defattr(-,root,root,-)
+%dir %{python2_sitearch}/rhsm
+%{python2_sitearch}/rhsm/*
+
+%if %{use_python3}
+%files -n python3-subscription-manager-rhsm
+%defattr(-,root,root,-)
+%dir %{python3_sitearch}/rhsm
+%{python3_sitearch}/rhsm/*
+%endif
+
+%files -n subscription-manager-rhsm-certificates
+%attr(755,root,root) %dir %{_sysconfdir}/rhsm
+%attr(755,root,root) %dir %{_sysconfdir}/rhsm/ca
+
+%attr(644,root,root) %{_sysconfdir}/rhsm/ca/redhat-uep.pem
+
+%if %use_cockpit
+%files -n subscription-manager-cockpit
+%defattr(-,root,root,-)
+%dir %{_datadir}/cockpit/subscription-manager
+%{_datadir}/cockpit/subscription-manager/index.html
+%{_datadir}/cockpit/subscription-manager/index.min.js.gz
+%{_datadir}/cockpit/subscription-manager/subscriptions.css
+%{_datadir}/cockpit/subscription-manager/manifest.json
+%{_datadir}/cockpit/subscription-manager/po.*.js
+%{_datadir}/cockpit/subscription-manager/po.js
+%{_datadir}/cockpit/subscription-manager/node_modules/*
+%{_datadir}/metainfo/org.cockpit-project.subscription-manager.metainfo.xml
+%endif
+
 %post
 %if %use_systemd
-    %systemd_post rhsmcertd.service
+    %if 0%{?suse_version}
+        %service_add_post rhsmcertd.service
+    %else
+        %systemd_post rhsmcertd.service
+    %endif
 %else
-    chkconfig --add rhsmcertd
+    %if 0%{?suse_version}
+        %fillup_and_insserv -f rhsmcertd
+    %else
+        chkconfig --add rhsmcertd
+    %endif
 %endif
 
 if [ -x /bin/dbus-send ] ; then
@@ -567,7 +836,12 @@ fi
 
 %post -n subscription-manager-gui
 touch --no-create %{_datadir}/icons/hicolor &>/dev/null || :
+%if !0%{?suse_version}
 scrollkeeper-update -q -o %{_datadir}/omf/%{name} || :
+%endif
+
+%post -n subscription-manager-plugin-container
+%{__python} %{rhsm_plugins_dir}/container_content.py || :
 
 %preun
 if [ $1 -eq 0 ] ; then
@@ -585,37 +859,375 @@ fi
 
 %postun
 %if %use_systemd
-    %systemd_postun_with_restart rhsmcertd.service
+    %if 0%{?suse_version}
+        %service_del_postun rhsmcertd.service
+    %else
+        %systemd_postun_with_restart rhsmcertd.service
+    %endif
 %endif
 
 %postun -n subscription-manager-gui
 if [ $1 -eq 0 ] ; then
     touch --no-create %{_datadir}/icons/hicolor &>/dev/null
     gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
+    %if !0%{?suse_version}
     scrollkeeper-update -q || :
+    %endif
 fi
 
 %posttrans -n subscription-manager-gui
-gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
+touch --no-create %{_datadir}/icons/hicolor &>/dev/null
+gtk-update-icon-cache -f %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
-* Fri Feb 10 2017 Vritant Jain <adarshvritant@gmail.com> 1.18.10-1
-- 1417746: more translations after Redhat associate contributions
-  (adarshvritant@gmail.com)
+* Wed May 09 2018 Christopher Snyder <csnyder@redhat.com> 1.20.10-7
+- 1574529: Fix rhsmcertd integer overflow on i386 & i686 (csnyder@redhat.com)
 
-* Wed Feb 01 2017 Vritant Jain <adarshvritant@gmail.com> 1.18.9-1
-- 1417746, 1417740, 1417736, 1417731: Fixed Translations for 6.9 post testing
-  (adarshvritant@gmail.com)
+* Wed Apr 18 2018 Christopher Snyder <csnyder@redhat.com> 1.20.10-6
+- 1559227: Do not use str format for python 2.6 (csnyder@redhat.com)
 
-* Fri Jan 20 2017 Vritant Jain <adarshvritant@gmail.com> 1.18.8-1
-- 1391681: Zanata translations for subscription-manager 1.18
-  (adarshvritant@gmail.com)
+* Wed Apr 18 2018 Christopher Snyder <csnyder@redhat.com> 1.20.10-5
+- 1559227: Do not log Error messages for missing identity cert/key
+  (csnyder@redhat.com)
+
+* Wed Apr 11 2018 Christopher Snyder <csnyder@redhat.com> 1.20.10-4
+- 1559743: Reduce log level of network address fact collection to debug
+  (csnyder@redhat.com)
+
+* Thu Mar 15 2018 Christopher Snyder <csnyder@redhat.com> 1.20.10-3
+- 1554482: Reenable RHUI support (csnyder@redhat.com)
+- 1551465: Fix unicode decode issue on py 2.6 (csnyder@redhat.com)
+- 1551386: Cannot put unicode into gtk for button label (wpoteat@redhat.com)
+
+* Wed Feb 28 2018 Christopher Snyder <csnyder@redhat.com> 1.20.10-2
+- Update cockpit license to LGPL2+ (csnyder@redhat.com)
+
+* Tue Jan 30 2018 Kevin Howell <khowell@redhat.com> 1.20.10-1
+- Update translations from zanata (khowell@redhat.com)
+- 1510024: Handle rhel-alt product tags properly (khowell@redhat.com)
+- 1526622: Do not delete product certificates in protected directory
+  (jhnidek@redhat.com)
+- 1527813: subman-gui use new URL of Online Documentation (jhnidek@redhat.com)
+- 1519512: Handle non-UTF8 RPM vendors (khowell@redhat.com)
+- 1526385: Bug fix of autoregistration in subman--cockpit plugin
+  (jhnidek@redhat.com)
+- 1527392: Clear credential data in register dialog (jhnidek@redhat.com)
+- 1526385: Fix registration success detection (khowell@redhat.com)
+- 1448313: Do not log error, when rhsmcertd is restarted (jhnidek@redhat.com)
+- 1516439: Cockpit reports error during unregister when candlepin unavailable
+  (jhnidek@redhat.com)
+
+* Fri Dec 15 2017 Kevin Howell <khowell@redhat.com> 1.20.9-1
+- Sync zanata translations (khowell@redhat.com)
+- 1510727: Enable starting of subman GUI, when consumer has been deleted
+  (jhnidek@redhat.com)
+- 1304056: Fix D-Bus path of com.redhat.RHSM1.Facts (jhnidek@redhat.com)
+
+* Mon Dec 11 2017 Kevin Howell <khowell@redhat.com> 1.20.8-1
+- Sync zanata translations (khowell@redhat.com)
+- Add parameter to D-Bus API to pass locale for localization of errors
+  (jhnidek@redhat.com)
+- 1463765: Fix wrong Indic-language translations (khowell@redhat.com)
+- 1487600: Cockpit - Save configuration from register dialog
+  (jhnidek@redhat.com)
+- 1464571: Improve multiple product certs errors (khowell@redhat.com)
+- Replace cockpit-subscriptions (khowell@redhat.com)
+- 1507158: Provide Host: in http CONNECT header (jhnidek@redhat.com)
+- 1319927: Remove newline from auto enable message (khowell@redhat.com)
+
+* Tue Nov 28 2017 Kevin Howell <khowell@redhat.com> 1.20.7-1
+- Sync zanata translations (khowell@redhat.com)
+
+* Tue Nov 28 2017 Kevin Howell <khowell@redhat.com> 1.20.6-1
+- Sync zanata translations (khowell@redhat.com)
+- 1514067: Call virt-what using absolute path (jhnidek@redhat.com)
+- 1487688: Load config settings for cockpit plugin (khowell@redhat.com)
+- Added dependencies to cockpit-bridge and cockpit-shell. (jhnidek@redhat.com)
+- 1462456: Flush stdout and stderr on more places (jhnidek@redhat.com)
+- 1491842: fixed typo in man page. (jhnidek@redhat.com)
+- 1508591: Removed python-rhsm from subscription-manager version
+  (jhnidek@redhat.com)
+- 1421010: Subman-GUI shows error dialog (wrong proxy settings)
+  (jhnidek@redhat.com)
+- 1500106: subscription-manager status --ondate do not ignore date
+  (jhnidek@redhat.com)
+- 1506970: Fixed default custom URL in cockpit plugin (jhnidek@redhat.com)
+
+* Thu Nov 02 2017 Kevin Howell <khowell@redhat.com> 1.20.5-1
+- Sync zanata translations (khowell@redhat.com)
+- Cockpit - listing of installed products using patternfly-react
+  (jhnidek@redhat.com)
+- 1508457: Bump versions in python-rhsm obsoletes (khowell@redhat.com)
+- Implement fallback for settimeout on old m2crypto (khowell@redhat.com)
+- Cockpit: reconcile translated strings (khowell@redhat.com)
+- Cockpit: use translations from root dir (khowell@redhat.com)
+
+* Mon Oct 30 2017 Kevin Howell <khowell@redhat.com> 1.20.4-1
+- Fix cockpit tgz path in spec file (khowell@redhat.com)
+
+* Mon Oct 30 2017 Kevin Howell <khowell@redhat.com> 1.20.3-1
+- Cockpit: Implement modal dialog (khowell@redhat.com)
+- Implement bootstrap-select component (khowell@redhat.com)
+- Port cockpit subscriptions-client to dbus (khowell@redhat.com)
+- Move python-rhsm build into subscription-manager (khowell@redhat.com)
+- 1354667: Add identity cert detection to proxy error message generation
+  (wpoteat@redhat.com)
+- 1501889: Enable yum plugins after sub-man subcommand is executed
+  (jhnidek@redhat.com)
+- 1477958: Use inotify for checking changes of consumer certs
+  (jhnidek@redhat.com)
+
+* Mon Oct 09 2017 Kevin Howell <khowell@redhat.com> 1.20.2-1
+- Sync zanata translations (khowell@redhat.com)
+- Bump python-rhsm requirement to 1.20.2 (khowell@redhat.com)
+- 1448313: Do not log error, when rhsm_icon.json does not exist
+  (jhnidek@redhat.com)
+- 1354667: Better message for proxy/identity cert issue (wpoteat@redhat.com)
+- 1489917: More robust reading of yum plugin file (jhnidek@redhat.com)
+- 1491842: Add man page doc for [rhsm] auto_enable_yum_plugins
+  (jhnidek@redhat.com)
+- 1493711: Fix --matches option for the list command. (awood@redhat.com)
+- 1476817: Set network.ipv4_address properly, when DNS misconfigured.
+  (jhnidek@redhat.com)
+- 1483746: Force UTF-8 encoding in rhsm-service (jhnidek@redhat.com)
+- rename RepoFile to YumRepoFile (dellweg@atix.de)
+- 1466453: [RFE] rhn-migrate-classic-to-rhsm auto-enable yum plugins
+  (jhnidek@redhat.com)
+- D-Bus service for removing entitlements (all/ID/serial num.)
+  (jhnidek@redhat.com)
+- 1489917: More robust reading of yum plugin file (jhnidek@redhat.com)
+- 1489877: minor typo in /etc/rhsm/rhsm.conf comment (jhnidek@redhat.com)
+- restructure RepoFile hierarchy (dellweg@atix.de)
+- 1319927: [RFE] sub-man automatically enables yum plugins (jhnidek@redhat.com)
+- Fix polymorphy for RHSMLogHandler (dellweg@atix.de)
+- 1481384: Do not update redhat.repo at RateLimitExceededException
+  (jhnidek@redhat.com)
+- 1485008: subman register --type="RHUI" should work (jhnidek@redhat.com)
+- 1481384: Do not update redhat.repo at RateLimitExceededException (#1685)
+  (jhnidek@redhat.com)
+- Do not attempt to register if already registered. (awood@redhat.com)
+- Integrate registration service into RegisterCommand. (awood@redhat.com)
+- 1480659: Properly initialize clean repo copy (khowell@redhat.com)
+- D-Bus service for unregistering system (#1680) (jhnidek@redhat.com)
+- Add an entitlement service and use it in the CLI and DBus. (awood@redhat.com)
+- Remove unneeded plugin conduit. (awood@redhat.com)
+- Clean up imports in dbus.base_object (awood@redhat.com)
+- Move certificate persistence into register service itself. (awood@redhat.com)
+- 1480395: Force UTF-8 encoding in daemons (khowell@redhat.com)
+- 1464571: 'sub-man release' prints error for more prod. certs.
+  (jhnidek@redhat.com)
+- 1400326: Better error print, when consumer cert is corrupted
+  (jhnidek@redhat.com)
+- Reload identity after registering. (awood@redhat.com)
+- Move registration code to a distinct service. (awood@redhat.com)
+- The get_installed_product_status() is now method of InstalledProducts, small
+  changes, refactoring. (jhnidek@redhat.com)
+- D-Bus service for listing installed products (jhnidek@redhat.com)
+- 1461003: Deprecate --type option on register command (wpoteat@redhat.com)
+- 1462928: Reset status after connection validation (khowell@redhat.com)
+- 1330036: Better status error message for initial-setup (jhnidek@redhat.com)
+
+* Thu Jul 27 2017 Alex Wood <awood@redhat.com> 1.20.1-1
+- Only return JSON body from Register service. (awood@redhat.com)
+- Add a DBus object and service to attach subscriptions. (awood@redhat.com)
+- 1472746: Correct sorting of dates in subman gui (jhnidek@redhat.com)
+- 1472715: Python module rhsm should never call exit() (jhnidek@redhat.com)
+- 1462456: added flush() method to Tee class in fixtures. (jhnidek@redhat.com)
+- 1462456: flushing of stdout and stderr once again (jhnidek@redhat.com)
+- 1329349: Add subscription-manager plugin to yum-config-manager
+  (khowell@redhat.com)
+- 1468297: Fix gui proxy check (khowell@redhat.com)
+- 1367672: Ignore "already attached" in register GUI (khowell@redhat.com)
+- 1350402: fix broken pipe error in other bin scripts (jhnidek@redhat.com)
+- 1463325: Output consumer name on registration (tony@anthonyjames.org)
+- Tell SUSE to use yum since python-kitchen is unavailable. (awood@redhat.com)
+- Do not package the yum plugins if they are not needed. (awood@redhat.com)
+- Use python-kitchen instead of yum for util method. (awood@redhat.com)
+- 1380341: Better dialog in GUI, when consumer is deleted at CP.
+  (jhnidek@redhat.com)
+- 1459194: open Online Documentation, when env. var. LANG is unset
+  (jhnidek@redhat.com)
+- 1455681: rhsm-debug created report dir with wrong perms (jhnidek@redhat.com)
+- 1452075: print only readable part of SSL error to console
+  (jhnidek@redhat.com)
+- 1413161: Add baseurl examples, explanation (khowell@redhat.com)
+- 1386914: Add hypervisor consumer type to manpages (khowell@redhat.com)
+- 1444453: Have gettext return unicode instead of bytes. (awood@redhat.com)
+- 1443570: Update retired article reference (redhatrises@gmail.com)
+- 1457348: Use https for the redhat.com/forgot_password label.
+  (jhnidek@redhat.com)
+- 1457197: Env. variable no_proxy=* is not ignored (jhnidek@redhat.com)
+- 1392709: Display better error msg., when wrong proxy is set up
+  (jhnidek@redhat.com)
+- 1448501: subman gui can unregister, when network is up again
+  (jhnidek@redhat.com)
+- 1422196: Update container certs after plugin install (khowell@redhat.com)
+- 1441397: added --noproxy for rhsm-debug auto-completion (jhnidek@redhat.com)
+- 1421010: GUI opens network dialog due to bad proxy during startup
+  (jhnidek@redhat.com)
+- 1414529: Raise exception with path/string of wrong certificate.
+  (jhnidek@redhat.com)
+- 1443164: no_proxy match the host name when *.redhat.com is used
+  (jhnidek@redhat.com)
+- 1441397: Added --noproxy to bash completion script (jhnidek@redhat.com)
+- Python 3 compatability fixes. (awood@redhat.com)
+- 1365472: Add mnemonic for subscription-manager spoke (khowell@redhat.com)
+- 1443159: Added default value for splay configuration (jhnidek@redhat.com)
+- 1452737: Enable saving no_proxy settings from GUI (jhnidek@redhat.com)
+- 1451003: identity reports right info in name field (jhnidek@redhat.com)
+- 1450818: Bug fix of com.redhat.Subscriptionmanager D-Bus policy
+  (jhnidek@redhat.com)
+- 1451166: Fix Host header when using proxy (khowell@redhat.com)
+- 1450049: Replace `-` with `_` in completion functions (khowell@redhat.com)
+- 1450862: remove obsolete certiciates of golden ticket (jhnidek@redhat.com)
+- 1448855: golden ticket entitlement was not removed. (jhnidek@redhat.com)
+- 1449824: facts collection aborts with unknown locale (jhnidek@redhat.com)
+- 1432231: Support /etc/init.d daemon even on EL7 (khowell@redhat.com)
+- 1450210: Make lscpu ignore locale again (khowell@redhat.com)
+- 1447211: Don't read non-existing json cache file. (jhnidek@redhat.com)
+- 1401787: Use json file for caching pool type. (jhnidek@redhat.com)
+- 1447722: use socket.getaddrinfo() to mimic hostname -f cmd
+  (jhnidek@redhat.com)
+- 1427069: Add secondary file to determine external repo file changes
+  (wpoteat@redhat.com)
+- 1444453: set bin scripts file encoding to utf-8 (khowell@redhat.com)
+- 1444453: Set default encoding for gui to UTF-8 (khowell@redhat.com)
+- include 'full_refresh_on_yum' logic in zypper service plugin
+  (dellweg@atix.de)
+- rehash ca-path in zypper service plugin (dellweg@atix.de)
+- Add preliminary zypper support (khowell@redhat.com)
+- Define libexec directory at compile time (kkaempf@suse.de)
+- Separate CFLAGS and LDFLAGS (kkaempf@suse.de)
+- 1445204: Update timestamp during intitial cert check. (jhnidek@redhat.com)
+
+* Mon May 08 2017 Kevin Howell <khowell@redhat.com> 1.20.0-1
+- Bump python-rhsm requirement to 1.20.0 (khowell@redhat.com)
+- 1444512: Display deleted uuid in facts dialog correctly. (jhnidek@redhat.com)
+
+* Tue May 02 2017 Kevin Howell <khowell@redhat.com> 1.19.12-1
+- Bump python-rhsm requirement to 1.19.6 (khowell@redhat.com)
+
+* Tue May 02 2017 Kevin Howell <khowell@redhat.com> 1.19.11-1
+- 1446638: Remove dbus-x11 dependency (khowell@redhat.com)
+- 1443101: Provide feedback for force register (khowell@redhat.com)
+- 1446469: Use sys.setdefaultencoding('utf-8') in better way.
+  (jhnidek@redhat.com)
+- 1440319: fixed wrong spelling. (jhnidek@redhat.com)
+- 1426343: fixed rct to display cert without subjectAltName.
+  (jhnidek@redhat.com)
+
+* Thu Apr 27 2017 Kevin Howell <khowell@redhat.com> 1.19.10-1
+- Sync zanata translations (khowell@redhat.com)
+- 1444714: Error reading system DMI information (jhnidek@redhat.com)
+- 1357152: Print right dates on subscription-manager list --installed
+  (jhnidek@redhat.com)
+- 1445387: Set locale fact to Unknown if value cannot be determined
+  (khowell@redhat.com)
+- 1443693: Enable to overwrite system.certificate_version with custom fact.
+  (jhnidek@redhat.com)
+- 1444800: Added mising policy file. (jhnidek@redhat.com)
+- 1429505: Facts dbus service does not start properly due to timeout.
+  (jhnidek@redhat.com)
+- 1443215: bug fix of writing time stamps. (jhnidek@redhat.com)
+- 1443554: Clicking at Help->Getting Started opens yelp. (jhnidek@redhat.com)
+- 1428002: Add proxy configuration info to man page (khowell@redhat.com)
+- 1443598: Remove M2Crypto reference from rhsmlib (khowell@redhat.com)
+
+* Thu Apr 20 2017 Kevin Howell <khowell@redhat.com> 1.19.9-1
+- Sync zanata translations (khowell@redhat.com)
+- 1438869: Capture dmidecode errors at fact gathering (khowell@redhat.com)
+- 1443205: Simplify rhsmcertd log message plurality (csnyder@redhat.com)
+- 1435771: Fix UnboundLocalError during custom facts collection
+  (csnyder@redhat.com)
+- 1426357: Fix DBus register service configuration issue. (awood@redhat.com)
+- 1405314: Better output message, when subman gui is launched with non-root
+  user. (jhnidek@redhat.com)
+- 1426685: Bug fix: subman doesn't log errors when repository enabling failed
+  (jhnidek@redhat.com)
+- 1441698: Install missing rpm package with fonts. (jhnidek@redhat.com)
+- 1438085: Do not include virt.uuid for platforms where it is not known
+  (csnyder@redhat.com)
+
+* Mon Apr 17 2017 Kevin Howell <khowell@redhat.com> 1.19.8-1
+- Sync zanata translations (khowell@redhat.com)
+- Bump python-rhsm requirement to 1.19.5 (khowell@redhat.com)
+- 1435013: Add splay option to rhsmcertd, randomize over interval
+  (csnyder@redhat.com)
+- 1438139: Make subscription details view expand (khowell@redhat.com)
+- 1438869: Clear dmidecode warnings (khowell@redhat.com)
+- Update log message to be more clear about the splay time being used
+  (csnyder@redhat.com)
+- 1438561: Do not use D-Bus for facts collection (khowell@redhat.com)
+- 1433368: 1432947: Filter content access certs at entitlement list level
+  (wpoteat@redhat.com)
+
+* Tue Apr 11 2017 Kevin Howell <khowell@redhat.com> 1.19.7-1
+- Sync zanata translations (khowell@redhat.com)
+- 1440934: Ensure rhsmcertd performs both types of checks (csnyder@redhat.com)
+- 1440251: Bug fixing building of rhsmcertd at RHEL (jhnidek@redhat.com)
+- 1440922: Add a description of maxSplayMinutes to the rhsm.conf man page
+  (csnyder@redhat.com)
+
+* Mon Apr 10 2017 Kevin Howell <khowell@redhat.com> 1.19.6-1
+- Bump required python-rhsm version to 1.19.4-1 (khowell@redhat.com)
+- 1435013: Add splay to all checks done by rhsmcertd (csnyder@redhat.com)
+- 1431659: Let rhsmcertd-worker clean up on SIGTERM (khowell@redhat.com)
+- 1428435: Make release set/unset regenerate repos (khowell@redhat.com)
+- 1425922: System locale in facts (wpoteat@redhat.com)
+- 1420533: Add no_proxy option to API, config, UI (khowell@redhat.com)
+- 1424614: Add support to rct to print contentAccessMode attribute
+  (rjerrido@outsidaz.org)
+- Automatic commit of package [python-rhsm] release [1.19.3-1].
+  (khowell@redhat.com)
+- 1434860: Only log correlation ID for specified cmd (khowell@redhat.com)
+
+* Thu Mar 30 2017 Kevin Howell <khowell@redhat.com> 1.19.5-1
+- Zanata translations for 1.19.X (khowell@redhat.com)
+- 1433479: rhsmcertd - check connection before lock (khowell@redhat.com)
+- 1427069: Prioritize content from Basic entitlements (khowell@redhat.com)
+- 1429657: Remove catch-all on register --force (khowell@redhat.com)
+
+* Mon Mar 20 2017 Kevin Howell <khowell@redhat.com> 1.19.4-1
+- Bump required python-rhsm version to 1.19.2 (khowell@redhat.com)
+- 1434094: Deny D-BUS Config.Set from non-root (khowell@redhat.com)
+
+* Mon Mar 20 2017 Kevin Howell <khowell@redhat.com> 1.19.3-1
+- Lock down Facts object to be accessible to root only. (awood@redhat.com)
+- 1423013: Allow DBus calls to the com.redhat.RHSM1 interfaces
+  (awood@redhat.com)
+- Address code paths with Coverity FORWARD_NULL (khowell@redhat.com)
+
+* Mon Mar 13 2017 Kevin Howell <khowell@redhat.com> 1.19.2-1
+- Query.na_dict() has been renamed in dnf 2.0 (#1544)
+  (MichaelMraka@users.noreply.github.com)
+- Add correlation ID to each cmd & rhsmcertd run (khowell@redhat.com)
+- 1425438: Hide content access certs from list cmd (khowell@redhat.com)
+- 1421930: Force update of icon cache on install of subman gui
+  (csnyder@redhat.com)
+- Bug fix: make install works as expected, when PYTHON_VER is not set using
+  system variable. (jiri.hnidek@tul.cz)
+- 1415708: Fix issues with facts gathering. (awood@redhat.com)
+- Add content access cert functionality to subman (khowell@redhat.com)
+- Bootstrap DBus mainloop when rhsmcertd runs. (awood@redhat.com)
+- Fix string comparison missed in python3 PR (khowell@redhat.com)
+- Add missing Requires and BuildRequires needed by F25. (awood@redhat.com)
+* Fri Jan 20 2017 Alex Wood <awood@redhat.com> 1.19.1-1
+- Add missing BuildRequires. (awood@redhat.com)
+- Zanata translations for 1.19 (adarshvritant@gmail.com)
 - Drop unsupported languages from zanata.xml (adarshvritant@gmail.com)
-- 1402009: Unset TERM inside subscription-manager (khowell@redhat.com)
+- Fix initialization of a couple of tests (khowell@redhat.com)
 
-* Wed Jan 11 2017 Vritant Jain <adarshvritant@gmail.com> 1.18.7-1
+* Thu Jan 19 2017 Alex Wood <awood@redhat.com> 1.19.0-1
+- Bump version to 1.19 (adarshvritant@gmail.com)
+- 1405125: Strip null byte from end of virt uuid. (awood@redhat.com)
+- Provide DBus objects for configuration, facts, and registration.
+  (awood@redhat.com)
+- Use repo location for python-rhsm dependency. (awood@redhat.com)
+- 1402009: Unset TERM inside subscription-manager (khowell@redhat.com)
 - 1404930: Provide GUI flow to fix proxy settings (khowell@redhat.com)
 - 1403387: Fix proxy conn test short-circuit (csnyder@redhat.com)
+- 1401394: Collect fqdn via `hostname -f` (khowell@redhat.com)
+
 * Fri Dec 09 2016 Vritant Jain <adarshvritant@gmail.com> 1.18.6-1
 - 1401078: "Remote server error" on BadStatusLine (khowell@redhat.com)
 - 1390712: Add --remove-rhn-packages to man pages (khowell@redhat.com)

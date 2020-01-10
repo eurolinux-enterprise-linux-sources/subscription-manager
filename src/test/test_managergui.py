@@ -1,7 +1,9 @@
-from fixture import SubManFixture
+from __future__ import print_function, division, absolute_import
+
+from .fixture import SubManFixture
 import mock
 
-import stubs
+from . import stubs
 from subscription_manager.gui import managergui, registergui
 from subscription_manager.injection import provide, \
         PRODUCT_DATE_RANGE_CALCULATOR, PROD_DIR
@@ -13,7 +15,7 @@ class TestManagerGuiMainWindow(SubManFixture):
         provide(PROD_DIR, stubs.StubProductDirectory([]))
         provide(PRODUCT_DATE_RANGE_CALCULATOR, mock.Mock())
 
-        managergui.MainWindow(backend=stubs.StubBackend(), facts=stubs.StubFacts(),
+        managergui.MainWindow(backend=stubs.StubBackend(),
                               ent_dir=stubs.StubCertificateDirectory([]),
                               prod_dir=stubs.StubProductDirectory([]))
 

@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2014 Red Hat, Inc.
 #
@@ -14,6 +16,8 @@
 #
 
 import logging
+
+from rhsm.certificate2 import CONTENT_ACCESS_CERT_TYPE
 
 log = logging.getLogger(__name__)
 
@@ -51,8 +55,9 @@ class Entitlement(object):
     rhsm EntitlementCertificate object uses.
     """
 
-    def __init__(self, contents=None):
+    def __init__(self, contents=None, entitlement_type=None):
         self.contents = contents
+        self.entitlement_type = entitlement_type
 
 
 class EntitlementSource(object):
@@ -82,13 +87,24 @@ def find_content(ent_source, content_type=None):
     Returns a list of model.Content.
     """
     entitled_content = []
+    content_access_entitlement_content = {}
+    content_labels = set()
     log.debug("Searching for content of type: %s" % content_type)
     for entitlement in ent_source:
         for content in entitlement.contents:
             # this is basically matching_content from repolib
             if content.content_type.lower() == content_type.lower() and \
                     content_tag_match(content.tags, ent_source.product_tags):
-                entitled_content.append(content)
+                if entitlement.entitlement_type == CONTENT_ACCESS_CERT_TYPE:
+                    content_access_entitlement_content[content.label] = content
+                else:
+                    entitled_content.append(content)
+                    content_labels.add(content.label)
+
+    # now add content that wasn't covered by basic entitlement certs
+    for label, content in list(content_access_entitlement_content.items()):
+        if label not in content_labels:
+            entitled_content.append(content)
     return entitled_content
 
 

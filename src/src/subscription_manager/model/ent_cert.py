@@ -1,4 +1,5 @@
-#
+from __future__ import print_function, division, absolute_import
+
 # Copyright (c) 2014 Red Hat, Inc.
 #
 # This software is licensed to you under the GNU General Public License,
@@ -48,7 +49,7 @@ class EntitlementCertEntitlement(Entitlement):
 
         # create a :EntitlementCertEntitlement with a EntitledContents
         # as the content Iterables
-        ent_cert_ent = cls(content_set)
+        ent_cert_ent = cls(content_set, ent_cert.entitlement_type)
 
         # could populate more info here, but
         # we don't actually seem to use it anywhere
@@ -67,6 +68,6 @@ class EntitlementDirEntitlementSource(EntitlementSource):
 
         # populate from ent certs
         self._entitlements = []
-        for ent_cert in ent_dir.list_valid():
+        for ent_cert in ent_dir.list_valid_with_content_access():
             self._entitlements.append(
                 EntitlementCertEntitlement.from_ent_cert(ent_cert))

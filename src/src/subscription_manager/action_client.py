@@ -1,4 +1,7 @@
 #!/usr/bin/python
+
+from __future__ import print_function, division, absolute_import
+
 #
 # Copyright (c) 2010 Red Hat, Inc.
 #
@@ -15,8 +18,6 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import gettext
 import logging
 
 from subscription_manager import base_action_client
@@ -32,13 +33,12 @@ from subscription_manager.content_action_client import ContentActionClient
 
 log = logging.getLogger(__name__)
 
-_ = gettext.gettext
-
 
 class ActionClient(base_action_client.BaseActionClient):
 
     def _get_libset(self):
 
+        # TODO: replace with FSM thats progress through this async and wait/joins if needed
         self.entcertlib = EntCertActionInvoker()
         self.content_client = ContentActionClient()
         self.factlib = FactsActionInvoker()

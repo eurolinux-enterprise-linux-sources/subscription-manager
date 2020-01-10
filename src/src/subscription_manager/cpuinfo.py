@@ -1,3 +1,5 @@
+from __future__ import print_function, division, absolute_import
+
 #
 # Read and parse /proc/cpuinfo
 #
@@ -318,6 +320,7 @@ def split_kv_list_by_field(kv_list, field):
     if current_stanza:
         yield current_stanza
 
+
 """
 Processor   : AArch64 Processor rev 0 (aarch64)
 processor   : 0
@@ -426,7 +429,7 @@ class X86_64CpuInfo(BaseCpuInfo):
             proc_dict = self.processor_stanza_to_processor_data(processor_stanza)
             processors.append(proc_dict)
             # keep track of fields as we see them
-            all_fields = accumulate_fields(all_fields, proc_dict.keys())
+            all_fields = accumulate_fields(all_fields, list(proc_dict.keys()))
 
         self.cpu_info.common = find_shared_key_value_pairs(all_fields, processors)
         self.cpu_info.processors = processors
@@ -483,7 +486,5 @@ class SystemCpuInfoFactory(object):
         proc_cpuinfo_path = cls.proc_cpuinfo_path
         if prefix:
             proc_cpuinfo_path = os.path.join(prefix, cls.proc_cpuinfo_path[1:])
-        proc_cpuinfo_buf = ''
         with open(proc_cpuinfo_path, 'r') as proc_cpuinfo_f:
-            proc_cpuinfo_buf = proc_cpuinfo_f.read()
-        return proc_cpuinfo_buf
+            return proc_cpuinfo_f.read()
