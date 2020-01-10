@@ -11,9 +11,10 @@
 # Red Hat trademarks are not licensed under GPLv2. No permission is
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
-
-import unittest
-
+try:
+    import unittest2 as unittest
+except ImportError:
+    import unittest
 
 import cStringIO
 
@@ -222,10 +223,10 @@ class HardwareProbeTests(fixture.SubManFixture):
         reload(hwprobe)
         hw = hwprobe.Hardware()
         MockExists.side_effect = [False, True]
-        hwprobe.platform = None
-        MockOpen.return_value.readline.return_value = "this is not really a release file of any sort"
-        self.assertEquals(hw.get_release_info(), {'distribution.version': 'Unknown',
-            'distribution.name': 'Unknown', 'distribution.id': 'Unknown'})
+        with patch('subscription_manager.hwprobe.platform'):
+            MockOpen.return_value.readline.return_value = "this is not really a release file of any sort"
+            self.assertEquals(hw.get_release_info(), {'distribution.version': 'Unknown',
+                'distribution.name': 'Unknown', 'distribution.id': 'Unknown'})
 
     @patch("os.path.exists")
     @patch("__builtin__.open")
@@ -252,11 +253,11 @@ class HardwareProbeTests(fixture.SubManFixture):
     def test_manual_distro_bogus_content_os_release(self, MockOpen, MockExists):
         reload(hwprobe)
         hw = hwprobe.Hardware()
-        hwprobe.platform = None
-        MockExists.return_value = True
-        MockOpen.return_value.readlines.return_value = ["This is not really a release file of any sort"]
-        self.assertEquals(hw.get_release_info(), {'distribution.version': 'Unknown',
-            'distribution.name': 'Unknown', 'distribution.id': 'Unknown'})
+        with patch('subscription_manager.hwprobe.platform'):
+            MockExists.return_value = True
+            MockOpen.return_value.readlines.return_value = ["This is not really a release file of any sort"]
+            self.assertEquals(hw.get_release_info(), {'distribution.version': 'Unknown',
+                'distribution.name': 'Unknown', 'distribution.id': 'Unknown'})
 
     @patch("os.path.exists")
     @patch("__builtin__.open")
@@ -275,10 +276,10 @@ class HardwareProbeTests(fixture.SubManFixture):
         reload(hwprobe)
         MockExists.side_effect = [False, True]
         hw = hwprobe.Hardware()
-        hwprobe.platform = None
-        MockOpen.return_value.readline.return_value = "Awesome OS release 42 Mega (Go4It)"
-        self.assertEquals(hw.get_release_info(), {'distribution.version': '42', 'distribution.name': 'Awesome OS',
-            'distribution.id': 'Go4It', 'distribution.version.modifier': 'mega'})
+        with patch('subscription_manager.hwprobe.platform'):
+            MockOpen.return_value.readline.return_value = "Awesome OS release 42 Mega (Go4It)"
+            self.assertEquals(hw.get_release_info(), {'distribution.version': '42', 'distribution.name': 'Awesome OS',
+                'distribution.id': 'Go4It', 'distribution.version.modifier': 'mega'})
 
     @patch("os.path.exists")
     @patch("__builtin__.open")
@@ -286,10 +287,10 @@ class HardwareProbeTests(fixture.SubManFixture):
         reload(hwprobe)
         MockExists.return_value = True
         hw = hwprobe.Hardware()
-        hwprobe.platform = None
-        MockOpen.return_value.readlines.return_value = OS_RELEASE.split('\n')
-        self.assertEquals(hw.get_release_info(), {'distribution.version': '42', 'distribution.name': 'Awesome OS',
-            'distribution.id': 'Go4It', 'distribution.version.modifier': 'beta'})
+        with patch('subscription_manager.hwprobe.platform'):
+            MockOpen.return_value.readlines.return_value = OS_RELEASE.split('\n')
+            self.assertEquals(hw.get_release_info(), {'distribution.version': '42', 'distribution.name': 'Awesome OS',
+                'distribution.id': 'Go4It', 'distribution.version.modifier': 'beta'})
 
     @patch("os.path.exists")
     @patch("__builtin__.open")
@@ -297,10 +298,40 @@ class HardwareProbeTests(fixture.SubManFixture):
         reload(hwprobe)
         MockExists.return_value = True
         hw = hwprobe.Hardware()
-        hwprobe.platform = None
-        MockOpen.return_value.readlines.return_value = OS_RELEASE_COLON.split('\n')
-        self.assertEquals(hw.get_release_info(), {'distribution.version': '42', 'distribution.name': 'Awesome OS',
-            'distribution.id': 'Go4It', 'distribution.version.modifier': 'be:ta'})
+        with patch('subscription_manager.hwprobe.platform'):
+            MockOpen.return_value.readlines.return_value = OS_RELEASE_COLON.split('\n')
+            self.assertEquals(hw.get_release_info(), {'distribution.version': '42', 'distribution.name': 'Awesome OS',
+                'distribution.id': 'Go4It', 'distribution.version.modifier': 'be:ta'})
+
+    def test_default_virt_uuid_physical(self):
+        """Check that physical systems dont set an 'Unknown' virt.uuid."""
+        reload(hwprobe)
+        hw = hwprobe.Hardware()
+        hw.allhw['virt.host_type'] = 'Not Applicable'
+        hw.allhw['virt.is_guest'] = False
+        hw.get_virt_uuid()
+        self.assertFalse('virt.uuid' in hw.allhw)
+
+    def test_default_virt_uuid_guest_no_uuid(self):
+        """Check that virt guest systems dont set an 'Unknown' virt.uuid if not found."""
+        reload(hwprobe)
+        hw = hwprobe.Hardware()
+        hw.allhw['virt.host_type'] = 'kvm'
+        hw.allhw['virt.is_guest'] = True
+        hw.get_virt_uuid()
+        self.assertFalse('virt.uuid' in hw.allhw)
+
+    def test_default_virt_uuid_guest_with_uuid(self):
+        """Check that virt guest systems dont set an 'Unknown' virt.uuid if virt.uuid is found."""
+        reload(hwprobe)
+        hw = hwprobe.Hardware()
+        hw.allhw['virt.host_type'] = 'kvm'
+        hw.allhw['virt.is_guest'] = True
+        fake_virt_uuid = 'this-is-a-weird-uuid'
+        hw.allhw['dmi.system.uuid'] = fake_virt_uuid
+        hw.get_virt_uuid()
+        self.assertTrue('virt.uuid' in hw.allhw)
+        self.assertEquals(fake_virt_uuid, hw.allhw['virt.uuid'])
 
     def test_get_arch(self):
         reload(hwprobe)
@@ -347,9 +378,8 @@ class HardwareProbeTests(fixture.SubManFixture):
         reload(hwprobe)
         hw = hwprobe.Hardware()
         net = hw.get_network_info()
-        self.assertEquals(len(net), 3)
-        for key in net:
-            assert key in ['network.hostname', 'network.ipv4_address', 'network.ipv6_address']
+        expected = set(['network.fqdn', 'network.hostname', 'network.ipv4_address', 'network.ipv6_address'])
+        self.assertEqual(expected, set(net.keys()))
 
     def test_network_interfaces(self):
         reload(hwprobe)
@@ -385,11 +415,8 @@ class HardwareProbeTests(fixture.SubManFixture):
 
         net_int = hw.get_network_interfaces()
 
-        # FIXME/TODO/NOTE: We currently expect to get just the last interface
-        # listed in this scenario. But... that is wrong. We should really
-        # be supporting multiple addresses per interface in some yet
-        # undetermined fashion
         self.assertEquals(net_int['net.interface.eth0.ipv4_address'], '10.0.0.2')
+        self.assertEquals(net_int['net.interface.eth0.ipv4_address_list'], '10.0.0.1, 10.0.0.2')
 
     @patch("ethtool.get_devices")
     @patch("ethtool.get_interfaces_info")

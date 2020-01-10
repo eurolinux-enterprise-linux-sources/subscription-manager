@@ -32,7 +32,7 @@ from subscription_manager import cpuinfo
 
 _ = gettext.gettext
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 
 # Exception classes used by this module.
@@ -114,6 +114,10 @@ class Hardware:
         self.testing = testing or False
 
         self.no_dmi_arches = ['s390x', 'ppc64', 'ppc64le', 'ppc']
+
+        # ppc64 LPAR has it's virt.uuid in /proc/devicetree
+        self.devicetree_vm_uuid_arches = ['ppc64', 'ppc64le']
+
         # we need this so we can decide which of the
         # arch specific code bases to follow
         self.arch = self.get_arch()
@@ -394,9 +398,8 @@ class Hardware:
         proc_cpuinfo = {}
         fact_namespace = 'proc_cpuinfo'
 
-        # FIXME: This is still pretty ugly for what seems so simple.
-        uname_machine = self.unameinfo['uname.machine']
-        proc_cpuinfo_source = cpuinfo.SystemCpuInfoFactory.from_uname_machine(uname_machine)
+        proc_cpuinfo_source = cpuinfo.SystemCpuInfoFactory.from_uname_machine(self.arch,
+                                                                              prefix=self.prefix)
 
         for key, value in proc_cpuinfo_source.cpu_info.common.items():
             proc_cpuinfo['%s.common.%s' % (fact_namespace, key)] = value
@@ -614,6 +617,8 @@ class Hardware:
         try:
             host = socket.gethostname()
             self.netinfo['network.hostname'] = host
+            fqdn = socket.getfqdn()
+            self.netinfo['network.fqdn'] = fqdn
 
             try:
                 info = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
@@ -666,15 +671,18 @@ class Hardware:
                     if scope == 'universe':
                         scope = 'global'
 
-                    # FIXME: this doesn't support multiple addresses per interface
-                    # (it finds them, but collides on the key name and loses all
-                    # but the last write). See bz #874735
+                    # Collect a list of addresses See bz #874735
                     for mkey in ipv6_metakeys:
                         key = '.'.join(['net.interface', info.device, 'ipv6_%s' % (mkey), scope])
+                        list_key = key + "_list"
                         # we could specify a default here... that could hide
                         # api breakage though and unit testing hw detect is... meh
                         attr = getattr(addr, mkey) or 'Unknown'
                         netinfdict[key] = attr
+                        if not netinfdict.get(list_key, None):
+                            netinfdict[list_key] = "" + str(attr)
+                        else:
+                            netinfdict[list_key] += ", " + str(attr)
 
                 # However, old version of python-ethtool do not support
                 # get_ipv4_address
@@ -692,16 +700,21 @@ class Hardware:
                 # python-ethtool only showed one ip address per interface. To
                 # accomdate the finer grained info, the api changed...
                 #
-                # FIXME: see FIXME for get_ipv6_address, we don't record multiple
-                # addresses per interface
                 if hasattr(info, 'get_ipv4_addresses'):
                     for addr in info.get_ipv4_addresses():
                         for mkey in ipv4_metakeys:
                             # append 'ipv4_' to match the older interface and keeps facts
                             # consistent
                             key = '.'.join(['net.interface', info.device, 'ipv4_%s' % (mkey)])
+                            info_key = key + '_list'
                             attr = getattr(addr, mkey) or 'Unknown'
+
                             netinfdict[key] = attr
+                            if not netinfdict.get(info_key, None):
+                                netinfdict[info_key] = "" + str(attr)
+                            else:
+                                netinfdict[info_key] += ", " + str(attr)
+
                 # check to see if we are actually an ipv4 interface
                 elif hasattr(info, 'ipv4_address'):
                     for mkey in old_ipv4_metakeys:
@@ -817,8 +830,6 @@ class Hardware:
         """
         no_uuid_platforms = ['powervm_lx86', 'xen-dom0', 'ibm_systemz']
 
-        self.allhw['virt.uuid'] = 'Unknown'
-
         try:
             for v in no_uuid_platforms:
                 if self.allhw['virt.host_type'].find(v) > -1:
@@ -827,12 +838,20 @@ class Hardware:
             log.warn(_("Error finding UUID: %s"), e)
             return  # nothing more to do
 
-        #most virt platforms record UUID via DMI/SMBIOS info.
-        if 'dmi.system.uuid' in self.allhw:
+        # most virt platforms record UUID via DMI/SMBIOS info.
+        # But only for guests, otherwise it's physical system uuid.
+        if self.allhw.get('virt.is_guest') and 'dmi.system.uuid' in self.allhw:
             self.allhw['virt.uuid'] = self.allhw['dmi.system.uuid']
 
-        #potentially override DMI-determined UUID with
-        #what is on the file system (xen para-virt)
+        # For ppc64, virt uuid is in /proc/device-tree/vm,uuid
+        # just the uuid in txt, one line
+
+        # ie, ppc64/ppc64le
+        if self.arch in self.devicetree_vm_uuid_arches:
+            self.allhw.update(self._get_devicetree_vm_uuid())
+
+        # potentially override DMI-determined UUID with
+        # what is on the file system (xen para-virt)
         try:
             uuid_file = open('/sys/hypervisor/uuid', 'r')
             uuid = uuid_file.read()
@@ -840,6 +859,28 @@ class Hardware:
             self.allhw['virt.uuid'] = uuid.rstrip("\r\n")
         except IOError:
             pass
+
+    def _get_devicetree_vm_uuid(self):
+        """Collect the virt.uuid fact from device-tree/vm,uuid
+
+        For ppc64/ppc64le systems running KVM or PowerKVM, the
+        virt uuid is found in /proc/device-tree/vm,uuid.
+
+        (In contrast to use of DMI on x86_64)."""
+
+        virt_dict = {}
+
+        vm_uuid_path = "%s/proc/device-tree/vm,uuid" % self.prefix
+
+        try:
+            with open(vm_uuid_path) as fo:
+                contents = fo.read()
+                vm_uuid = contents.strip()
+                virt_dict['virt.uuid'] = vm_uuid
+        except IOError, e:
+            log.warn("Tried to read %s but there was an error: %s", vm_uuid_path, e)
+
+        return virt_dict
 
     def log_platform_firmware_warnings(self):
         "Log any warnings from firmware info gather,and/or clear them."
@@ -867,10 +908,9 @@ class Hardware:
                 log.warn("%s" % hardware_method)
                 log.warn("Hardware detection failed: %s" % e)
 
-        #we need to know the DMI info and VirtInfo before determining UUID.
-        #Thus, we can't figure it out within the main data collection loop.
-        if self.allhw.get('virt.is_guest'):
-            self.get_virt_uuid()
+        # we need to know the DMI info and VirtInfo before determining UUID.
+        # Thus, we can't figure it out within the main data collection loop.
+        self.get_virt_uuid()
 
         log.info("collected virt facts: virt.is_guest=%s, virt.host_type=%s, virt.uuid=%s",
                  self.allhw.get('virt.is_guest', 'Not Set'),
@@ -881,11 +921,6 @@ class Hardware:
 
 
 if __name__ == '__main__':
-    _LIBPATH = "/usr/share/rhsm"
-    # add to the path if need be
-    if _LIBPATH not in sys.path:
-        sys.path.append(_LIBPATH)
-
     from subscription_manager import logutil
     logutil.init_logger()
 

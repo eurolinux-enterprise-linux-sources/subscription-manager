@@ -26,7 +26,7 @@ import socket
 import syslog
 import urllib
 
-from M2Crypto.SSL import SSLError
+from rhsm.https import ssl
 
 from subscription_manager.branding import get_branding
 from subscription_manager.certdirectory import Path
@@ -37,14 +37,15 @@ from subscription_manager import injection as inj
 # we may want to import some of the other items for
 # compatibility.
 from rhsm.utils import parse_url
+from rhsm.connection import ProxyException
 
 import subscription_manager.version
 import rhsm.version
-from rhsm.connection import UEPConnection, RestlibException, GoneException
+from rhsm.connection import RestlibException, GoneException
 from rhsm.config import DEFAULT_PORT, DEFAULT_PREFIX, DEFAULT_HOSTNAME, \
     DEFAULT_CDN_HOSTNAME, DEFAULT_CDN_PORT, DEFAULT_CDN_PREFIX
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 _ = lambda x: gettext.ldgettext("rhsm", x)
 
@@ -61,11 +62,18 @@ class DefaultDict(collections.defaultdict):
         return pprint.pformat(self.as_dict())
 
 
-def parse_server_info(local_server_entry):
+def parse_server_info(local_server_entry, config=None):
+    hostname = ''
+    port = ''
+    prefix = ''
+    if config is not None:
+        hostname = config.get("server", "hostname")
+        port = config.get("server", "port")
+        prefix = config.get("server", "prefix")
     return parse_url(local_server_entry,
-                     DEFAULT_HOSTNAME,
-                     DEFAULT_PORT,
-                     DEFAULT_PREFIX)[2:]
+                      hostname or DEFAULT_HOSTNAME,
+                      port or DEFAULT_PORT,
+                      prefix or DEFAULT_PREFIX)[2:]
 
 
 def parse_baseurl_info(local_server_entry):
@@ -120,8 +128,7 @@ class MissingCaCertException(Exception):
     pass
 
 
-# TODO: make sure this works with --proxy cli options
-def is_valid_server_info(hostname, port, prefix):
+def is_valid_server_info(conn):
     """
     Check if we can communicate with a subscription service at the given
     location.
@@ -131,9 +138,7 @@ def is_valid_server_info(hostname, port, prefix):
     May throw a MissingCaCertException if the CA certificate has not been
     imported yet, which may be relevant to the caller.
     """
-    # Proxy info should already be in config file and used by default:
     try:
-        conn = UEPConnection(host=hostname, ssl_port=int(port), handler=prefix)
         conn.ping()
         return True
     except RestlibException, e:
@@ -144,10 +149,12 @@ def is_valid_server_info(hostname, port, prefix):
         else:
             log.exception(e)
             return False
-    except SSLError, e:
+    except ssl.SSLError as e:
         # Indicates a missing CA certificate, which callers may need to
         # notify the user of:
         raise MissingCaCertException(e)
+    except ProxyException:
+        raise
     except Exception, e:
         log.exception(e)
         return False

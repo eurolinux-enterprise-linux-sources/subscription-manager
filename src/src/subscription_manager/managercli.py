@@ -25,14 +25,17 @@ import logging
 from optparse import OptionValueError
 import os
 import re
+import readline
 import socket
 import sys
 from time import localtime, strftime, strptime
 
-from M2Crypto import X509
+from rhsm.certificate import CertificateException
+from rhsm.https import ssl
 
 import rhsm.config
 import rhsm.connection as connection
+from rhsm.connection import ProxyException
 from rhsm.utils import remove_scheme, ServerUrlParseError
 from rhsm.certificate import GMT
 
@@ -62,7 +65,7 @@ from subscription_manager.printing_utils import columnize, format_name, \
 
 _ = gettext.gettext
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 cfg = rhsm.config.initConfig()
 
@@ -200,6 +203,7 @@ def autosubscribe(cp, consumer_uuid, service_level=None):
     except Exception, e:
         log.warning("Error during auto-attach.")
         log.exception(e)
+        raise
 
 
 def show_autosubscribe_output(uep):
@@ -309,6 +313,24 @@ class CliCommand(AbstractCLICommand):
     def _get_logger(self):
         return logging.getLogger('rhsm-app.%s.%s' % (self.__module__, self.__class__.__name__))
 
+    def test_proxy_connection(self):
+        result = None
+        if not self.proxy_hostname and not cfg.get("server", "proxy_hostname"):
+            return True
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(10)
+            result = s.connect_ex((self.proxy_hostname or cfg.get("server", "proxy_hostname"), int(self.proxy_port or rhsm.config.DEFAULT_PROXY_PORT)))
+        except Exception as e:
+            log.info("Attempted bad proxy: %s" % e)
+            return False
+        finally:
+            s.close()
+        if result:
+            return False
+        else:
+            return True
+
     def _request_validity_check(self):
         # Make sure the sorter is fresh (low footprint if it is)
         inj.require(inj.CERT_SORTER).force_cert_check()
@@ -407,20 +429,10 @@ class CliCommand(AbstractCLICommand):
             try:
                 (self.server_hostname,
                  self.server_port,
-                 self.server_prefix) = parse_server_info(self.options.server_url)
+                 self.server_prefix) = parse_server_info(self.options.server_url, cfg)
             except ServerUrlParseError, e:
                 print _("Error parsing serverurl:")
                 handle_exception("Error parsing serverurl:", e)
-            # this trys to actually connect to the server and ping it
-            try:
-                if not is_valid_server_info(self.server_hostname, self.server_port, self.server_prefix):
-                    system_exit(os.EX_UNAVAILABLE, _("Unable to reach the server at %s:%s%s") % (
-                        self.server_hostname,
-                        self.server_port,
-                        self.server_prefix
-                    ))
-            except MissingCaCertException:
-                system_exit(os.EX_CONFIG, _("Error: CA certificate for subscription service has not been installed."))
 
             cfg.set("server", "hostname", self.server_hostname)
             cfg.set("server", "port", self.server_port)
@@ -453,6 +465,7 @@ class CliCommand(AbstractCLICommand):
             else:
                 # if no port specified, use the one from the config, or fallback to the default
                 self.proxy_port = cfg.get_int('server', 'proxy_port') or rhsm.config.DEFAULT_PROXY_PORT
+            config_changed = True
 
         if hasattr(self.options, "proxy_user") and self.options.proxy_user:
             self.proxy_user = self.options.proxy_user
@@ -495,11 +508,32 @@ class CliCommand(AbstractCLICommand):
 
             self.entcertlib = EntCertActionInvoker()
 
+            if config_changed:
+                try:
+                    # catch host/port issues; does not catch auth issues
+                    if not self.test_proxy_connection():
+                        system_exit(os.EX_UNAVAILABLE, _("Proxy connection failed, please check your settings."))
+
+                    # this tries to actually connect to the server and ping it
+                    if not is_valid_server_info(self.no_auth_cp):
+                        system_exit(os.EX_UNAVAILABLE, _("Unable to reach the server at %s:%s%s") % (
+                            self.no_auth_cp.host,
+                            self.no_auth_cp.ssl_port,
+                            self.no_auth_cp.handler
+                        ))
+
+                except MissingCaCertException:
+                    system_exit(os.EX_CONFIG,
+                                _("Error: CA certificate for subscription service has not been installed."))
+                except ProxyException:
+                    system_exit(os.EX_UNAVAILABLE, _("Proxy connection failed, please check your settings."))
+
         else:
             self.cp = None
 
         # do the work, catch most common errors here:
         try:
+
             return_code = self._do_command()
 
             # Only persist the config changes if there was no exception
@@ -508,7 +542,7 @@ class CliCommand(AbstractCLICommand):
 
             if return_code is not None:
                 return return_code
-        except X509.X509Error, e:
+        except (CertificateException, ssl.SSLError) as e:
             log.error(e)
             system_exit(os.EX_SOFTWARE, _('System certificates corrupted. Please reregister.'))
         except connection.GoneException, ge:
@@ -544,6 +578,7 @@ class UserPassCommand(CliCommand):
         """
         while not username:
             username = raw_input(_("Username: "))
+            readline.clear_history()
         while not password:
             password = getpass.getpass(_("Password: "))
         return (username.strip(), password.strip())
@@ -582,6 +617,7 @@ class OrgCommand(UserPassCommand):
     def _get_org(org):
         while not org:
             org = raw_input(_("Organization: "))
+            readline.clear_history()
         return org
 
     @property
@@ -619,7 +655,17 @@ class RefreshCommand(CliCommand):
     def _do_command(self):
         self.assert_should_be_registered()
         try:
+            # get current consumer identity
+            identity = inj.require(inj.IDENTITY)
+
+            # Force a regen of the entitlement certs for this consumer
+            # TODO: Eventually migrate this to capability recognition. Currently it will silently return
+            #   false if an error occurs
+            if not self.cp.regenEntitlementCertificates(identity.uuid, True):
+                log.debug("Warning: Unable to refresh entitlement certificates; service likely unavailable")
+
             self.entcertlib.update()
+
             log.info("Refreshed local data")
             print (_("All local data refreshed"))
         except connection.RestlibException, re:
@@ -1081,9 +1127,13 @@ class RegisterCommand(UserPassCommand):
                         self.options.consumerid)
                 consumer = admin_cp.getConsumer(self.options.consumerid,
                         self.username, self.password)
-                if consumer['type']['manifest']:
+
+                if 'type' not in consumer:
+                    log.warn('Unable to determine consumer type, proceeding with registration.')
+
+                if consumer.get('type', {}).get('manifest', {}):
                     log.error("registration attempted with consumerid = Subscription Management Application's uuid: %s" % self.options.consumerid)
-                    system_exit(os.EX_USAGE, _("Error: Cannot register with an ID of a Subscription Management Application: %s" % self.options.consumerid))
+                    system_exit(os.EX_USAGE, _("Error: Cannot register with an ID of a Subscription Management Application: %s") % self.options.consumerid)
 
             else:
                 owner_key = self._determine_owner_key(admin_cp)
@@ -1178,7 +1228,9 @@ class RegisterCommand(UserPassCommand):
         """
         By breaking this code out, we can write cleaner tests
         """
-        return raw_input(_("Environment: ")).strip() or self._prompt_for_environment()
+        environment = raw_input(_("Environment: ")).strip()
+        readline.clear_history()
+        return environment or self._prompt_for_environment()
 
     def _get_environment_id(self, cp, owner_key, environment_name):
         # If none specified on CLI and the server doesn't support environments,
@@ -1241,6 +1293,7 @@ class RegisterCommand(UserPassCommand):
         owner_key = None
         while not owner_key:
             owner_key = raw_input(_("Organization: "))
+            readline.clear_history()
         return owner_key
 
 
@@ -1479,6 +1532,7 @@ class AttachCommand(CliCommand):
 
         # If a pools file was specified, process its contents and append it to options.pool
         if self.options.file:
+            self.options.file = os.path.expanduser(self.options.file)
             if self.options.file == '-' or os.path.isfile(self.options.file):
                 self._read_pool_ids(self.options.file)
 
@@ -1660,11 +1714,21 @@ class RemoveCommand(CliCommand):
 
     def _print_unbind_ids_result(self, success, failure, id_name):
         if success:
-            print _("%s successfully removed at the server:" % id_name)
+            if id_name == "pools":
+                print _("The entitlement server successfully removed these pools:")
+            elif id_name == "serial numbers":
+                print _("The entitlement server successfully removed these serial numbers:")
+            else:
+                print _("The entitlement server successfully removed these IDs:")
             for id_ in success:
                 print "   %s" % id_
         if failure:
-            print _("%s unsuccessfully removed at the server:" % id_name)
+            if id_name == "pools":
+                print _("The entitlement server failed to remove these pools:")
+            elif id_name == "serial numbers":
+                print _("The entitlement server failed to remove these serial numbers:")
+            else:
+                print _("The entitlement server failed to remove these IDs:")
             for id_ in failure:
                 print "   %s" % id_
 
@@ -1694,7 +1758,7 @@ class RemoveCommand(CliCommand):
                         pool_ids = unique_list_items(self.options.pool_ids)  # Don't allow duplicates
                         pool_id_to_serials = self.entitlement_dir.list_serials_for_pool_ids(pool_ids)
                         success, failure = self._unbind_ids(self.cp.unbindByPoolId, identity.uuid, pool_ids)
-                        self._print_unbind_ids_result(success, failure, "Pools")
+                        self._print_unbind_ids_result(success, failure, "pools")
                         if not success:
                             return_code = 1
                         else:
@@ -1709,7 +1773,7 @@ class RemoveCommand(CliCommand):
                         removed_serials.extend(success)
                         if not success:
                             return_code = 1
-                    self._print_unbind_ids_result(removed_serials, failure, "Serial numbers")
+                    self._print_unbind_ids_result(removed_serials, failure, "serial numbers")
                 self.entcertlib.update()
             except connection.RestlibException, re:
                 log.error(re)
@@ -1817,6 +1881,8 @@ class ImportCertCommand(CliCommand):
                                help=_("certificate file to import (can be specified more than once)"))
 
     def _validate_options(self):
+        if self.is_registered():
+            system_exit(os.EX_USAGE, _("Error: You may not import certificates into a system that is registered to a subscription management service."))
         if not self.options.certificate_file:
             system_exit(os.EX_USAGE, _("Error: This command requires that you specify a certificate with --certificate."))
 
@@ -1825,6 +1891,7 @@ class ImportCertCommand(CliCommand):
         # Return code
         imported_certs = []
         for src_cert_file in self.options.certificate_file:
+            src_cert_file = os.path.expanduser(src_cert_file)
             if os.path.exists(src_cert_file):
                 try:
                     extractor = managerlib.ImportFileExtractor(src_cert_file)
@@ -1848,7 +1915,7 @@ class ImportCertCommand(CliCommand):
                             "Please check log file for more information."))
             else:
                 log.error("Supplied certificate file does not exist: %s" % src_cert_file)
-                print(_("%s is not a valid certificate file. Please use a valid certificate.") %
+                print(_("%s: file not found.") %
                     os.path.basename(src_cert_file))
 
         # update branding info for the imported certs, if needed
@@ -2047,8 +2114,8 @@ class ReposCommand(CliCommand):
             matches = set([repo for repo in repos if fnmatch.fnmatch(repo.id, repoid)])
             if not matches:
                 rc = 1
-                print _("Error: %s is not a valid repository ID. "
-                        "Use --list option to see valid repositories.") % repoid
+                print _("Error: '%s' does not match a valid repository ID. "
+                        "Use \"subscription-manager repos --list\" to see valid repositories.") % repoid
 
             # Overwrite repo if it's already in the dict, we want the last
             # match to be the one sent to server.
@@ -2508,9 +2575,11 @@ class OverrideCommand(CliCommand):
     def _colon_split(self, option, opt_str, value, parser):
         if parser.values.additions is None:
             parser.values.additions = {}
+        if value.strip() == '':
+            raise OptionValueError(_("You must specify an override in the form of \"name:value\" with --add."))
 
         k, colon, v = value.partition(':')
-        if not v:
+        if not v or not k:
             raise OptionValueError(_("--add arguments should be in the form of \"name:value\""))
 
         parser.values.additions[k] = v
@@ -2526,6 +2595,10 @@ class OverrideCommand(CliCommand):
         if self.options.repos and not (self.options.list or self.options.additions or
                                        self.options.removals or self.options.remove_all):
             system_exit(os.EX_USAGE, _("Error: The --repo option must be used with --list or --add or --remove."))
+        if self.options.removals:
+            stripped_removals = [removal.strip() for removal in self.options.removals]
+            if '' in stripped_removals:
+                system_exit(os.EX_USAGE, _("Error: You must specify an override name with --remove."))
         # If no relevant options were given, just show a list
         if not (self.options.repos or self.options.additions or
                 self.options.removals or self.options.remove_all or self.options.list):

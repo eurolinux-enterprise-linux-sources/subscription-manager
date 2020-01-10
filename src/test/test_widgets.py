@@ -11,8 +11,10 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
-
-import unittest
+try:
+    import unittest2 as unittest
+except ImportError:
+    import unittest
 
 #from gi.repository import Gtk
 from datetime import datetime, timedelta
@@ -22,7 +24,7 @@ from subscription_manager.ga import Gtk as ga_Gtk
 from subscription_manager.gui.storage import MappedTreeStore
 from subscription_manager.gui.widgets import MachineTypeColumn, QuantitySelectionColumn, \
                                              SubDetailsWidget, ContractSubDetailsWidget, \
-                                             DatePicker
+                                             DatePicker, HasSortableWidget
 from dateutil.tz import tzlocal
 
 
@@ -136,6 +138,58 @@ class BaseColumnTest(unittest.TestCase):
         column = column_class(0)
         column._render_cell(None, column.renderer, model, model.get_iter_first())
         self.assertEquals(expected_text, column.renderer.get_property("text"))
+
+
+class TestHasSortableWidget(unittest.TestCase):
+
+    def _run_cases(self, cases, expected):
+        for index, case in enumerate(cases):
+            result = HasSortableWidget.compare_text(*case)
+            self.assertEqual(result, expected[index])
+
+    def test_compare_text_ints(self):
+        # Two string representations of ints
+        str1 = '1'
+        str2 = '2'
+        cases = [
+            (str1, str2),  # x < y should return -1
+            (str2, str1),  # x > y should return 1
+            (str1, str1)  # x == y should return 0
+        ]
+        expected = [
+            -1,
+            1,
+            0
+        ]
+
+        self._run_cases(cases, expected)
+
+    def test_compare_text_unlimited(self):
+        # Test unlimited comparison
+        unlimited = 'Unlimited'
+        str1 = '1'
+        cases = [
+            (unlimited, str1),  # Unlimited, 1 should return 1
+            (str1, unlimited),  # 1, Unlimited should return -1
+            (unlimited, unlimited)  # Unlimited, Unlimited should return 0
+        ]
+        expected = [
+            1,
+            -1,
+            0
+        ]
+
+        self._run_cases(cases, expected)
+
+    def test_compare_alphabetic_text(self):
+        cases = [
+            ('a', 'b'),
+            ('b', 'a'),
+            ('a', 'a')
+        ]
+        expected = [cmp(*case) for case in cases]
+
+        self._run_cases(cases, expected)
 
 
 class TestMachineTypeColumn(BaseColumnTest):

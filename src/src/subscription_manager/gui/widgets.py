@@ -21,6 +21,7 @@ import time
 import warnings
 
 from rhsm.certificate import GMT
+from rhsm.connection import safe_int
 from dateutil.tz import tzlocal
 
 from subscription_manager.ga import GObject as ga_GObject
@@ -47,7 +48,7 @@ GLADE_SUFFIX = "glade"
 WARNING_COLOR = '#FFFB82'
 EXPIRED_COLOR = '#FFAF99'
 
-log = logging.getLogger("rhsm-app." + __name__)
+log = logging.getLogger(__name__)
 # Some versions of gtk has incorrect translations for the calendar widget
 # and gtk itself complains about this with errors like:
 #
@@ -113,8 +114,7 @@ class BuilderFileBasedWidget(FileBasedGui):
         The initial_widget_names is a list of widgets to pull in as instance
         variables.
         """
-        self.log = logging.getLogger('rhsm-app.' + __name__ +
-                                     '.' + self.__class__.__name__)
+        self.log = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
         self.builder = ga_Gtk.Builder()
 
@@ -134,8 +134,7 @@ class SubmanBaseWidget(ga_GObject.GObject):
         ga_GObject.GObject.__init__(self)
         self.gui = self._gui_factory()
         self.pull_widgets(self.gui, self.widget_names)
-        self.log = logging.getLogger('rhsm-app.' + __name__ +
-                                     '.' + self.__class__.__name__)
+        self.log = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
     def _gui_factory(self):
         gui = BuilderFileBasedWidget.from_file(self.gui_file)
@@ -183,7 +182,23 @@ class HasSortableWidget(object):
         # column indexes.  The column name is passed in through 'key'.
         str1 = model.get_value(row1, model[key])
         str2 = model.get_value(row2, model[key])
-        return cmp(str1, str2)
+        return HasSortableWidget.compare_text(str1, str2)
+
+    @staticmethod
+    def compare_text(str1, str2):
+        # Ensure our text fields are compared properly
+        # 'Unlimited' is greater than all except 'Unlimited'
+        # Strings will be converted to an int if possible
+
+        if str1 == 'Unlimited':
+            if str2 == 'Unlimited':
+                return 0
+            return 1
+        elif str2 == 'Unlimited':
+            return -1
+        value1 = safe_int(str1, str1)
+        value2 = safe_int(str2, str2)
+        return cmp(value1, value2)
 
     def sort_date(self, model, row1, row2, key):
         date1 = model.get_value(row1, model[key]) \
@@ -333,7 +348,11 @@ class SelectionWrapper(object):
         return self.tree_iter is not None
 
     def __getitem__(self, key):
-        return self.model.get_value(self.tree_iter, self.store[key])
+        try:
+            return self.model.get_value(self.tree_iter, self.store[key])
+        except TypeError, te:
+            log.warning('Invalid item request: %s', te)
+        return None
 
 
 class OverridesTable(object):
@@ -547,6 +566,10 @@ class ContractSubDetailsWidget(SubDetailsWidget):
 
         self._set(self.details_view, '\n'.join(reasons))
 
+        # set background for GTK2
+        self.start_end_date_text.modify_base(ga_Gtk.StateType.NORMAL,
+                self._get_date_bg(end, expiring))
+        # set background for GTK3
         self.start_end_date_text.modify_bg(ga_Gtk.StateType.NORMAL,
                 self._get_date_bg(end, expiring))
 
@@ -948,14 +971,19 @@ class QuantitySelectionColumn(ga_Gtk.TreeViewColumn):
 
         if self.available_store_idx is not None:
             available = tree_model.get_value(tree_iter, self.available_store_idx)
-            if available and available != -1:
-                if self.quantity_increment_idx is not None:
-                    increment = tree_model.get_value(tree_iter, self.quantity_increment_idx)
-                else:
-                    increment = 1
 
-                cell_renderer.set_property("adjustment",
-                    ga_Gtk.Adjustment(lower=int(increment), upper=int(available), step_incr=int(increment)))
+            if self.quantity_increment_idx is not None:
+                increment = tree_model.get_value(tree_iter, self.quantity_increment_idx)
+            else:
+                increment = 1
+
+            if available:
+                if available != -1:
+                    cell_renderer.set_property("adjustment",
+                        ga_Gtk.Adjustment(lower=int(increment), upper=int(available), step_incr=int(increment)))
+                else:
+                    cell_renderer.set_property("adjustment",
+                        ga_Gtk.Adjustment(lower=int(increment), upper=100, step_incr=int(increment)))
 
 
 class TextTreeViewColumn(ga_Gtk.TreeViewColumn):

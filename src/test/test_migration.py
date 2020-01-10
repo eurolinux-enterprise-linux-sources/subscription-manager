@@ -11,17 +11,18 @@
 # Red Hat trademarks are not licensed under GPLv2. No permission is
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
+try:
+    import unittest2 as unittest
+except ImportError:
+    import unittest
 
 import os
 import re
-import rhsm.config
 import StringIO
 import stubs
-import sys
-import unittest
 
 from mock import patch, NonCallableMock, MagicMock, Mock, call
-from M2Crypto import SSL
+from rhsm.https import ssl
 from fixture import Capture, SubManFixture, temp_file
 from optparse import OptionParser
 from textwrap import dedent
@@ -43,10 +44,6 @@ class TestMenu(unittest.TestCase):
             ("displayed-hello", "Hello"),
             ("displayed-world", "World"),
             ], "")
-        sys.stderr = stubs.MockStderr()
-
-    def tearDown(self):
-        sys.stderr = sys.__stderr__
 
     def test_enter_negative(self):
         self.assertRaises(migrate.InvalidChoiceError, self.menu._get_item, -1)
@@ -133,10 +130,6 @@ class TestMigration(SubManFixture):
                 self.engine.cp = stubs.StubUEP()
                 self.system_id_file = temp_id_file
 
-        # These tests print a lot to stdout and stderr
-        # so quiet them.
-        sys.stderr = stubs.MockStderr()
-
         self.double_mapped_channels = (
             "rhel-i386-client-dts-5-beta",
             "rhel-i386-client-dts-5-beta-debuginfo",
@@ -160,7 +153,6 @@ class TestMigration(SubManFixture):
 
     def tearDown(self):
         patch.stopall()
-        sys.stderr = sys.__stderr__
 
     def test_5to6_options(self):
         five_to_six = True
@@ -171,6 +163,7 @@ class TestMigration(SubManFixture):
         self.assertFalse(parser.has_option("--environment"))
         self.assertFalse(parser.has_option("--force"))
         self.assertFalse(parser.has_option("--activation-key"))
+        self.assertTrue(parser.has_option("--remove-rhn-packages"))
         (opts, args) = parser.parse_args([])
         migrate.set_defaults(opts, five_to_six)
         self.assertTrue(opts.five_to_six)
@@ -186,6 +179,7 @@ class TestMigration(SubManFixture):
         self.assertTrue(parser.has_option("--environment"))
         self.assertTrue(parser.has_option("--force"))
         self.assertTrue(parser.has_option("--activation-key"))
+        self.assertTrue(parser.has_option("--remove-rhn-packages"))
         (opts, args) = parser.parse_args([])
         migrate.set_defaults(opts, five_to_six_script=False)
         self.assertFalse(opts.five_to_six)
@@ -238,14 +232,14 @@ class TestMigration(SubManFixture):
         (options, args) = parser.parse_args(["--activation-key", "bar", "--destination-password", "y"])
         self.assertRaises(SystemExit, migrate.validate_options, (options))
 
-    @patch.object(rhsm.config.RhsmConfigParser, "get", autospec=True)
+    @patch.object(stubs.StubConfig, "get", autospec=True)
     def test_is_hosted(self, mock_get):
         mock_get.return_value = "subscription.rhsm.redhat.com"
         self.assertTrue(migrate.is_hosted())
         mock_get.return_value = "subscription.rhn.redhat.com"
         self.assertTrue(migrate.is_hosted())
 
-    @patch.object(rhsm.config.RhsmConfigParser, "get", autospec=True)
+    @patch.object(stubs.StubConfig, "get", autospec=True)
     def test_is_not_hosted(self, mock_get):
         mock_get.return_value = "subscription.example.com"
         self.assertFalse(migrate.is_hosted())
@@ -586,7 +580,7 @@ class TestMigration(SubManFixture):
 
     def test_ssl_error(self):
         self._inject_mock_invalid_consumer()
-        self.engine.cp.getStatus = MagicMock(side_effect=SSL.SSLError)
+        self.engine.cp.getStatus = MagicMock(side_effect=ssl.SSLError)
         try:
             self.engine.check_ok_to_proceed()
         except SystemExit, e:
@@ -1242,3 +1236,43 @@ class TestMigration(SubManFixture):
         """
         system_id = self.engine.get_system_id(mock_id)
         self.assertEquals(123, system_id)
+
+    def test_remove_rhn_packages_option_default(self):
+        parser = OptionParser()
+        migrate.add_parser_options(parser)
+        (opts, args) = parser.parse_args([])
+        self.assertFalse(opts.remove_legacy_packages)
+
+    def test_remove_rhn_packages_option(self):
+        parser = OptionParser()
+        migrate.add_parser_options(parser)
+        (opts, args) = parser.parse_args(["--remove-rhn-packages"])
+        self.assertTrue(opts.remove_legacy_packages)
+
+    @patch("__builtin__.open", autospec=True)
+    def test_is_using_systemd_false_on_rhel6(self, mock_open):
+        mock_open.return_value = StringIO.StringIO("Red Hat Enterprise Linux Server release 6.3 (Santiago)")
+        self.assertFalse(self.engine.is_using_systemd())
+
+    @patch("__builtin__.open", autospec=True)
+    def test_is_using_systemd_true_on_rhel7(self, mock_open):
+        mock_open.return_value = StringIO.StringIO("Red Hat Enterprise Linux Server release 7.2 (Maipo)")
+        self.assertTrue(self.engine.is_using_systemd())
+
+    @patch("subprocess.call", autospec=True)
+    def test_handle_legacy_daemons_systemd(self, mock_subprocess):
+        self.engine.handle_legacy_daemons(using_systemd=True)
+        self.assertIn('systemctl', mock_subprocess.call_args[0][0])
+
+    @patch("subprocess.call", autospec=True)
+    def test_handle_legacy_daemons_systemv(self, mock_subprocess):
+        with patch("os.path.exists") as mock_exists:
+            mock_exists.return_value = True
+            self.engine.handle_legacy_daemons(using_systemd=False)
+        self.assertIn('service', mock_subprocess.call_args[0][0])
+
+    @patch("subprocess.call", autospec=True)
+    def test_remove_rhn_packages(self, mock_subprocess):
+        self.engine.remove_legacy_packages()
+
+        self.assertIn('yum', mock_subprocess.call_args[0][0])

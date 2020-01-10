@@ -38,7 +38,7 @@ _ = gettext.gettext
 
 DIR = os.path.dirname(__file__)
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 
 class NetworkConfigDialog(widgets.SubmanBaseWidget):
@@ -75,11 +75,16 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
         self.enableProxyButton.connect("toggled", self.clear_connection_label)
         self.enableProxyAuthButton.connect("toggled", self.clear_connection_label)
 
-        self.enableProxyButton.connect("toggled", self.enable_test_button)
+        self.enableProxyButton.connect("toggled", self.enable_or_disable_test_button)
+        self.enableProxyAuthButton.connect("toggled", self.enable_or_disable_test_button)
 
         self.proxyEntry.connect("changed", self.clear_connection_label)
         self.proxyUserEntry.connect("changed", self.clear_connection_label)
         self.proxyPasswordEntry.connect("changed", self.clear_connection_label)
+
+        self.proxyEntry.connect("changed", self.enable_or_disable_test_button)
+        self.proxyUserEntry.connect("changed", self.enable_or_disable_test_button)
+        self.proxyPasswordEntry.connect("changed", self.enable_or_disable_test_button)
 
         self.proxyEntry.connect("focus-out-event", self.clean_proxy_entry)
 
@@ -111,10 +116,10 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
         self.proxyUserEntry.set_text(str(self.cfg.get("server", "proxy_user") or ""))
         self.proxyPasswordEntry.set_text(str(self.cfg.get("server", "proxy_password") or ""))
         self.connectionStatusLabel.set_label("")
-        # If there is no proxy information, disable the proxy test
+        # If there is missing proxy information, disable the proxy test
         # button.
+        self.enable_or_disable_test_button()
         if not self.enableProxyButton.get_active():
-            self.testConnectionButton.set_sensitive(False)
             self.enableProxyAuthButton.set_sensitive(False)
 
     def write_values(self, widget=None, dummy=None):
@@ -170,8 +175,20 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
     def on_cancel_clicked(self, button):
         self.networkConfigDialog.hide()
 
-    def enable_test_button(self, button):
-        self.testConnectionButton.set_sensitive(button.get_active())
+    def _has_complete_proxy_info(self):
+        return self.enableProxyButton.get_active() and self.proxyEntry.get_text().strip() and (
+            not self.enableProxyAuthButton.get_active() or (
+                # https connection doesn't use auth unless both are provided as non-empty
+                # FIXME we should account for the above in other places, such as write_values and documentation
+                self.proxyUserEntry.get_text() and self.proxyPasswordEntry.get_text()
+            )
+        )
+
+    def enable_or_disable_test_button(self, widget=None):
+        if self._has_complete_proxy_info():
+            self.testConnectionButton.set_sensitive(True)
+        else:
+            self.testConnectionButton.set_sensitive(False)
 
     def clear_connection_label(self, entry):
         self.connectionStatusLabel.set_label("")
@@ -227,8 +244,11 @@ class NetworkConfigDialog(widgets.SubmanBaseWidget):
     def clean_proxy_entry(self, widget=None, dummy=None):
         proxy_url = self.proxyEntry.get_text()
         proxy_host, proxy_port = self.parse_proxy_entry(proxy_url)
-        cleaned_proxy_url = "%s:%s" % (proxy_host, proxy_port)
-        self.proxyEntry.set_text(cleaned_proxy_url)
+        if proxy_host:
+            cleaned_proxy_url = proxy_host
+            if proxy_port:
+                cleaned_proxy_url = cleaned_proxy_url + ":" + proxy_port
+            self.proxyEntry.set_text(cleaned_proxy_url)
         return (proxy_host, proxy_port)
 
     def parse_proxy_entry(self, proxy_url):

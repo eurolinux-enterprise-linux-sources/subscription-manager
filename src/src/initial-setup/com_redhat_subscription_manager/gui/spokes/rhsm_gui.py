@@ -17,17 +17,14 @@
 #
 
 import logging
-import sys
 
+from pyanaconda.ui.communication import hubQ
 from pyanaconda.ui.gui.spokes import NormalSpoke
 from pyanaconda.ui.common import FirstbootOnlySpokeMixIn
 from pyanaconda.ui.categories.system import SystemCategory
 from pyanaconda.ui.gui.utils import really_hide
 
 log = logging.getLogger(__name__)
-
-RHSM_PATH = "/usr/share/rhsm"
-sys.path.append(RHSM_PATH)
 
 from subscription_manager import ga_loader
 
@@ -72,6 +69,8 @@ class RHSMSpoke(FirstbootOnlySpokeMixIn, NormalSpoke):
 
         backend = managergui.Backend()
         self.info = registergui.RegisterInfo()
+        self.info.connect('notify::register-status', self._on_register_status_change)
+        self._status = self.info.get_property('register-status')
 
         self.register_widget = registergui.RegisterWidget(backend, facts,
                                                           reg_info=self.info,
@@ -105,6 +104,7 @@ class RHSMSpoke(FirstbootOnlySpokeMixIn, NormalSpoke):
 
         self.register_box.show_all()
         self.register_widget.initialize()
+        self.back_button.set_sensitive(False)
 
     @property
     def ready(self):
@@ -133,7 +133,7 @@ class RHSMSpoke(FirstbootOnlySpokeMixIn, NormalSpoke):
         This is displayed under the spokes name on it's hub."""
 
         # The status property is only used read/only, so no setter required.
-        return self.info.get_property('register-status')
+        return self._status
 
     def refresh(self):
         """Update gui widgets to reflect state of self.data.
@@ -197,18 +197,22 @@ class RHSMSpoke(FirstbootOnlySpokeMixIn, NormalSpoke):
     def execute(self):
         """When the spoke is left, this can run anything that needs to happen.
 
-        For RHSMSpoke, the spoke has already done everything it needs to do,
-        so this is empty. Typically a module would gather enough info to
-        perform all the actions in the execute(), but RHSMSpoke is not typical."""
+        Wait for any async processing to complete."""
+        self.register_widget.async.block_until_complete()
 
-        pass
+    def _on_register_status_change(self, obj, params):
+        status = obj.get_property('register-status')
+        self._status = status
+        hubQ.send_message(self.__class__.__name__, self._status)
 
     def _on_back_button_clicked(self, button):
         """Handler for self.back_buttons 'clicked' signal.
 
         Clear out any user set values and return to the start screen."""
-
+        self.clear_info()
         self.register_widget.emit('back')
+        self.back_button.set_sensitive(not self.register_widget.applied_screen_history.is_empty())
+
         # TODO: clear out settings and restart?
         # TODO: attempt to undo the REST api calls we've made?
         #self.register_widget.set_initial_screen()
@@ -283,7 +287,7 @@ class RHSMSpoke(FirstbootOnlySpokeMixIn, NormalSpoke):
     def _on_register_screen_ready_change(self, obj, value):
         ready = self.register_widget.current_screen.get_property('ready')
         self.proceed_button.set_sensitive(ready)
-        self.back_button.set_sensitive(ready)
+        self.back_button.set_sensitive(ready and not self.register_widget.applied_screen_history.is_empty())
 
     def _on_register_button_label_change(self, obj, value):
         """Handler for registergui.RegisterWidgets's 'register-button-label' property notifications.

@@ -28,7 +28,8 @@ from subscription_manager.ga import GObject as ga_GObject
 
 import rhsm.config as config
 from rhsm.utils import ServerUrlParseError
-from rhsm.connection import GoneException, RestlibException
+from rhsm.connection import GoneException, RestlibException, UEPConnection, \
+        ProxyException
 
 from subscription_manager.branding import get_branding
 from subscription_manager.action_client import ActionClient
@@ -50,7 +51,7 @@ _ = lambda x: gettext.ldgettext("rhsm", x)
 
 gettext.textdomain("rhsm")
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 CFG = config.initConfig()
 
@@ -64,22 +65,32 @@ ERROR_SCREEN = -3
 DONT_CHANGE = -2
 PROGRESS_PAGE = -1
 CHOOSE_SERVER_PAGE = 0
-ACTIVATION_KEY_PAGE = 1
-CREDENTIALS_PAGE = 2
-OWNER_SELECT_PAGE = 3
-ENVIRONMENT_SELECT_PAGE = 4
-PERFORM_REGISTER_PAGE = 5
-SELECT_SLA_PAGE = 6
-CONFIRM_SUBS_PAGE = 7
-PERFORM_SUBSCRIBE_PAGE = 8
-REFRESH_SUBSCRIPTIONS_PAGE = 9
-INFO_PAGE = 10
-DONE_PAGE = 11
+VALIDATE_SERVER_PAGE = 1
+ACTIVATION_KEY_PAGE = 2
+CREDENTIALS_PAGE = 3
+PERFORM_UNREGISTER_PAGE = 4
+OWNER_SELECT_PAGE = 5
+ENVIRONMENT_SELECT_PAGE = 6
+PERFORM_REGISTER_PAGE = 7
+UPLOAD_PACKAGE_PROFILE_PAGE = 8
+SELECT_SLA_PAGE = 9
+CONFIRM_SUBS_PAGE = 10
+PERFORM_SUBSCRIBE_PAGE = 11
+REFRESH_SUBSCRIPTIONS_PAGE = 12
+INFO_PAGE = 13
+DONE_PAGE = 14
 FINISH = 100
 
 REGISTER_ERROR = _("<b>Unable to register the system.</b>") + \
     "\n%s\n" + \
     _("Please see /var/log/rhsm/rhsm.log for more information.")
+
+
+class RemoteUnregisterException(Exception):
+    """
+    This exception is to be used when we are unable to unregister from the server.
+    """
+    pass
 
 
 # from old smolt code.. Force glibc to call res_init()
@@ -107,6 +118,18 @@ def reset_resolver():
     except Exception, e:
         log.warning("reset_resolver failed: %s", e)
         pass
+
+
+def server_info_from_config(config):
+    return {
+            "host": config.get('server', 'hostname'),
+            "ssl_port": config.get_int('server', 'port'),
+            "handler": config.get('server', 'prefix'),
+            "proxy_hostname": config.get('server', 'proxy_hostname'),
+            "proxy_port": config.get_int('server', 'proxy_port'),
+            "proxy_user": config.get('server', 'proxy_user'),
+            "proxy_password": config.get('server', 'proxy_password')
+           }
 
 
 # FIXME: TODO: subclass collections.MutableSequence
@@ -137,6 +160,9 @@ class UniqueList(object):
         p = self._list.pop()
         return p
 
+    def is_empty(self):
+        return len(self._list) == 0
+
 
 class RegisterInfo(ga_GObject.GObject):
     """GObject holding registration info and state.
@@ -152,6 +178,12 @@ class RegisterInfo(ga_GObject.GObject):
     hostname = ga_GObject.property(type=str, default='')
     port = ga_GObject.property(type=str, default='')
     prefix = ga_GObject.property(type=str, default='')
+    use_activation_keys = ga_GObject.property(type=bool, default=False)
+
+    server_info = ga_GObject.property(type=ga_GObject.TYPE_PYOBJECT, default=None)
+
+    # Used to control whether or not we should use the PerformUnregisterScreen
+    enable_unregister = ga_GObject.property(type=bool, default=False)
 
     # rhsm model info
     environment = ga_GObject.property(type=str, default='')
@@ -225,7 +257,7 @@ class RegisterWidget(widgets.SubmanBaseWidget):
 
     screen_ready = ga_GObject.property(type=bool, default=True)
     register_button_label = ga_GObject.property(type=str, default=_('Register'))
-    # TODO: a prop equilivent to initial-setups 'completed' and 'status' props
+    # TODO: a prop equivalent to initial-setups 'completed' and 'status' props
 
     def __init__(self, backend, facts, reg_info=None,
                  parent_window=None):
@@ -242,7 +274,7 @@ class RegisterWidget(widgets.SubmanBaseWidget):
         #       widget
         self.parent_window = parent_window
 
-        #self.info = reg_info or RegisterInfo()
+        # self.info = reg_info or RegisterInfo()
         self.info = reg_info
 
         self.progress_timer = None
@@ -278,12 +310,15 @@ class RegisterWidget(widgets.SubmanBaseWidget):
         self.register_notebook.connect('switch-page',
                                        self._on_switch_page)
 
-        screen_classes = [ChooseServerScreen, ActivationKeyScreen,
-                          CredentialsScreen, OrganizationScreen,
-                          EnvironmentScreen, PerformRegisterScreen,
-                          SelectSLAScreen, ConfirmSubscriptionsScreen,
-                          PerformSubscribeScreen, RefreshSubscriptionsScreen,
-                          InfoScreen, DoneScreen]
+        screen_classes = [ChooseServerScreen, ValidateServerScreen, ActivationKeyScreen,
+                          CredentialsScreen, PerformUnregisterScreen,
+                          OrganizationScreen, EnvironmentScreen,
+                          PerformRegisterScreen,
+                          PerformPackageProfileSyncScreen, SelectSLAScreen,
+                          ConfirmSubscriptionsScreen, PerformSubscribeScreen,
+                          RefreshSubscriptionsScreen, InfoScreen,
+                          DoneScreen]
+
         self._screens = []
 
         # TODO: current_screen as a gobject property
@@ -367,6 +402,11 @@ class RegisterWidget(widgets.SubmanBaseWidget):
     def do_register_finished(self):
         msg = _("System '%s' successfully registered.\n") % self.info.identity.name
         self.info.set_property('register-status', msg)
+        CFG.save()
+        last_server_info = server_info_from_config(CFG)
+        last_server_info['cert_file'] = self.backend.cp_provider.cert_file
+        last_server_info['key_file'] = self.backend.cp_provider.key_file
+        self.info.set_property('server-info', last_server_info)
 
     def do_finished(self):
         """Class closure signal handler for the 'finished' signal.
@@ -384,6 +424,7 @@ class RegisterWidget(widgets.SubmanBaseWidget):
         try:
             last = self.applied_screen_history.pop()
             self._set_screen(last)
+            self._screens[last].back_handler()
         except IndexError:
             pass
 
@@ -654,8 +695,7 @@ class RegisterDialog(widgets.SubmanBaseWidget):
     widget_names = ['register_dialog', 'register_dialog_main_vbox',
                     'register_details_label',
                     'back_button', 'register_button',
-                    'close_button', 'progress_label',
-                    'dialog_vbox6']
+                    'close_button', 'progress_label']
 
     gui_file = "register_dialog"
     __gtype_name__ = 'RegisterDialog'
@@ -704,6 +744,7 @@ class RegisterDialog(widgets.SubmanBaseWidget):
                                self._on_register_state_change)
 
         self.window = self.register_dialog
+        self.back_button.set_sensitive(False)
 
     def create_wizard_widget(self, backend, facts, reg_info, parent_window):
         """Create a RegisterWidget or subclass and use it for our content."""
@@ -758,11 +799,12 @@ class RegisterDialog(widgets.SubmanBaseWidget):
 
     def _on_back_button_clicked(self, obj):
         self.register_widget.emit('back')
+        self.back_button.set_sensitive(not self.register_widget.applied_screen_history.is_empty())
 
     def _on_register_screen_ready_change(self, obj, value):
         ready = self.register_widget.current_screen.get_property('ready')
         self.register_button.set_sensitive(ready)
-        self.back_button.set_sensitive(ready)
+        self.back_button.set_sensitive(ready and not self.register_widget.applied_screen_history.is_empty())
 
     def _on_register_button_clicked(self, button):
         self.register_widget.emit('proceed')
@@ -792,6 +834,20 @@ class AutoBindWidget(RegisterWidget):
 
     def choose_initial_screen(self):
         self.current_screen.emit('move-to-screen', SELECT_SLA_PAGE)
+        self.register_widget.show_all()
+        return False
+
+
+class FirstbootWidget(RegisterWidget):
+    # A RegisterWidget for use in firstboot.
+    # This widget, along with the PerformUnregisterScreen, will ensure that
+    # all screens are shown, and the user is allowed to register again.
+    __gtype_name__ = "FirstbootWidget"
+
+    initial_screen = CHOOSE_SERVER_PAGE
+
+    def choose_initial_screen(self):
+        self.current_screen.emit('move-to-screen', self.initial_screen)
         self.register_widget.show_all()
         return False
 
@@ -847,7 +903,7 @@ class Screen(widgets.SubmanBaseWidget):
         super(Screen, self).__init__()
 
         self.pre_message = ""
-        self.button_label = _("Register")
+        self.button_label = _("_Register")
         self.needs_gui = True
         self.index = -1
         # REMOVE self._error_screen = self.index
@@ -864,6 +920,9 @@ class Screen(widgets.SubmanBaseWidget):
     def pre(self):
         self.pre_done()
         return False
+
+    def back_handler(self):
+        return
 
     def pre_done(self):
         self.set_property('ready', True)
@@ -926,6 +985,9 @@ class NoGuiScreen(ga_GObject.GObject):
         self.pre_done()
         return True
 
+    def back_handler(self):
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
     def pre_done(self):
         self.set_property('ready', True)
 
@@ -960,45 +1022,25 @@ class PerformRegisterScreen(NoGuiScreen):
             self.pre_done()
             return
 
-        try:
-            managerlib.persist_consumer_cert(new_account)
-        except Exception, e:
-            # hint: register error, back to creds?
-            self.emit('register-error', REGISTER_ERROR, e)
-            self.pre_done()
-            return
-
         # trigger a id cert reload
         self.emit('identity-updated')
 
-        # Force all the cert dir backends to update, but mostly
-        # force the identity cert monitor to run, which will
-        # also update Backend. It also blocks until the new
-        # identity is reloaded, so we don't start the selectSLA
-        # screen before it.
-        self.async.backend.cs.force_cert_check()
-
+        # NOTE: Assume we want to try to upload package profile even with
+        # activation keys
+        self.emit('move-to-screen', UPLOAD_PACKAGE_PROFILE_PAGE)
         # Done with the registration stuff, now on to attach
+        # NOTE: the signal register-finished should come after any
+        # move-to-screen signals to ensure we end up at the done screen if we
+        # end up skipping the attach step. See bz 1372673
         self.emit('register-finished')
-
-        # Having activation-keys means the 'skip-auto-bind' wasn't an
-        # option. So 'skip-auto-bind' and 'activation-keys' are
-        # exclusive in practice.
-        if self.info.get_property('activation-keys'):
-            self.emit('move-to-screen', REFRESH_SUBSCRIPTIONS_PAGE)
-            self.pre_done()
-            return
-
-        if self.info.get_property('skip-auto-bind'):
-            # We are done at this point basically. The handler for 'register-finished'
-            # will take care of going to the done screen. This is just to avoid starting
-            # select sla page's pre(). In the future it may make sense to have a 'screen'
-            # after this that just does the logic in these if statements in a non-async pre()
-            # so we could potentially block on it.
-            self.pre_done()
-            return
-
-        self.emit('move-to-screen', SELECT_SLA_PAGE)
+        # TODO: After register-finished, there is still a whole
+        # series of steps before we start attaching, most of which
+        # would be useful to have async...
+        #  - persisting consumer certs
+        #  - reloading the new identity
+        #  - uploading package profile
+        #  - potentially getting/setting SLA
+        #  - reset'ing cert sorter and friends
         self.pre_done()
         return
 
@@ -1015,6 +1057,94 @@ class PerformRegisterScreen(NoGuiScreen):
                                      self.info.get_property('activation-keys'),
                                      self._on_registration_finished_cb)
 
+        return True
+
+    def back_handler(self):
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
+
+class PerformUnregisterScreen(NoGuiScreen):
+
+    screen_enum = PERFORM_UNREGISTER_PAGE
+
+    def _on_unregistration_finished_cb(self, retval, error=None):
+        if error is not None:
+            self.emit('register-error',
+                      _('Unable to unregister'),
+                      error)
+
+        # clean all local data regardless of the success of the network unregister
+        managerlib.clean_all_data(backup=False)
+
+        self.emit('move-to-screen', OWNER_SELECT_PAGE)
+
+        self.pre_done()
+        return
+
+    def pre(self):
+        msg = _("Unregistering")
+        self.info.set_property('register-status', msg)
+        self.info.set_property('details-label-txt', msg)
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
+        # Unregister if we have gotten here with a valid identity and have old server info
+        if self.info.identity.is_valid() and self.info.get_property('server-info') and self.info.get_property('enable-unregister'):
+            self.async.unregister_consumer(self.info.identity.uuid,
+                                           self.info.get_property('server-info'),
+                                           self._on_unregistration_finished_cb)
+            return True
+
+        self.emit('move-to-screen', OWNER_SELECT_PAGE)
+        self.pre_done()
+        return False
+
+    def back_handler(self):
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
+
+# After registering, we can upload package profiles.
+# But... we don't have to do it immed after registering, it could
+# be in a later screen or a back ground task (user flow isn't
+# altered by results of package profile, and it's kind of slow, it
+# could happen in it's own thread while we go through other screens
+class PerformPackageProfileSyncScreen(NoGuiScreen):
+    screen_enum = UPLOAD_PACKAGE_PROFILE_PAGE
+
+    def __init__(self, reg_info, async_backend, facts, parent_window):
+        super(PerformPackageProfileSyncScreen, self).__init__(reg_info, async_backend, facts, parent_window)
+        self.pre_message = _("Uploading package profile")
+
+    def _on_update_package_profile_finished_cb(self, result, error=None):
+        if error is not None:
+            self.emit('register-error',
+                      REGISTER_ERROR,
+                      error)
+
+            # Allow failure on package profile uploads
+            self.emit('move-to-screen', SELECT_SLA_PAGE)
+            self.pre_done()
+            return
+
+        try:
+            if self.info.get_property('activation-keys'):
+                self.emit('move-to-screen', REFRESH_SUBSCRIPTIONS_PAGE)
+            # could/should we rely on RegisterWidgets register-finished to handle this?
+            # ie, detecting when we are 'done' registering
+            elif self.info.get_property('skip-auto-bind'):
+                pass
+            # Or more likely, the server doesn't support package profile updates
+            # so we got a result of 0 and no error
+            else:
+                self.emit('move-to-screen', SELECT_SLA_PAGE)
+        except Exception, e:
+            self.emit('register-error', REGISTER_ERROR, e)
+
+        self.pre_done()
+        return
+
+    def pre(self):
+        self.async.update_package_profile(self.info.identity.uuid,
+                                          self._on_update_package_profile_finished_cb)
         return True
 
 
@@ -1038,6 +1168,7 @@ class PerformSubscribeScreen(NoGuiScreen):
 
     def pre(self):
         self.info.set_property('details-label-txt', self.pre_message)
+        self.info.set_property('register-state', RegisterState.SUBSCRIBING)
         self.async.subscribe(self.info.identity.uuid,
                              self.info.get_property('current-sla'),
                              self.info.get_property('dry-run-result'),
@@ -1056,7 +1187,7 @@ class ConfirmSubscriptionsScreen(Screen):
 
     def __init__(self, reg_info, async_backend, facts, parent_window):
         super(ConfirmSubscriptionsScreen, self).__init__(reg_info, async_backend, facts, parent_window)
-        self.button_label = _("Attach")
+        self.button_label = _("_Attach")
 
         self.store = ga_Gtk.ListStore(str, bool, str)
         self.subs_treeview.set_model(self.store)
@@ -1122,7 +1253,7 @@ class SelectSLAScreen(Screen):
         super(SelectSLAScreen, self).__init__(reg_info, async_backend, facts, parent_window)
 
         self.pre_message = _("Finding suitable service levels")
-        self.button_label = _("Next")
+        self.button_label = _("_Next")
 
         self.list_store = ga_Gtk.ListStore(str, ga_GObject.TYPE_PYOBJECT)
         self.sla_combobox.set_model(self.list_store)
@@ -1202,6 +1333,7 @@ class SelectSLAScreen(Screen):
                 #        did we do that when we created GoneException?
                 msg = _("Consumer has been deleted.")
                 self.emit('register-error', msg, None)
+                self.emit('attach-finished')
                 self.pre_done()
                 return
             elif isinstance(error[1], RestlibException) and error[1].code == "401":
@@ -1218,7 +1350,7 @@ class SelectSLAScreen(Screen):
                 return
             else:
                 log.exception(error)
-                self.emit('register-error', _("Error subscribing"), error)
+                self.emit('register-error', _("Error subscribing: %s"), error)
                 self.emit('attach-finished')
                 self.pre_done()
                 return
@@ -1321,7 +1453,7 @@ class EnvironmentScreen(Screen):
 
         envs = [(env['id'], env['name']) for env in environments]
         if len(envs) == 1:
-            self.set_environement(envs[0][0])
+            self.set_environment(envs[0][0])
             self.emit('move-to-screen', PERFORM_REGISTER_PAGE)
             self.pre_done()
             return
@@ -1337,6 +1469,9 @@ class EnvironmentScreen(Screen):
         self.async.get_environment_list(self.info.get_property('owner-key'),
                                         self._on_get_environment_list_cb)
         return True
+
+    def back_handler(self):
+        self.info.set_property('register-state', RegisterState.REGISTERING)
 
     def apply(self):
         model, tree_iter = self.environment_treeview.get_selection().get_selected()
@@ -1409,6 +1544,9 @@ class OrganizationScreen(Screen):
                                   self._on_get_owner_list_cb)
         return True
 
+    def back_handler(self):
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
     def apply(self):
         # check for selection exists
         model, tree_iter = self.owner_treeview.get_selection().get_selected()
@@ -1435,6 +1573,7 @@ class CredentialsScreen(Screen):
                                           'registration_header_label']
 
     gui_file = "credentials"
+    screen_enum = CREDENTIALS_PAGE
 
     def __init__(self, reg_info, async_backend, facts, parent_window):
         super(CredentialsScreen, self).__init__(reg_info, async_backend, facts, parent_window)
@@ -1517,8 +1656,7 @@ class CredentialsScreen(Screen):
         self.info.set_property('password', password)
         self.info.set_property('skip-auto-bind', skip_auto_bind)
         self.info.set_property('consumername', consumername)
-
-        self.emit('move-to-screen', OWNER_SELECT_PAGE)
+        self.emit('move-to-screen', PERFORM_UNREGISTER_PAGE)
         return True
 
     def clear(self):
@@ -1528,8 +1666,12 @@ class CredentialsScreen(Screen):
         self._initialize_consumer_name()
         self.skip_auto_bind.set_active(False)
 
+    def back_handler(self):
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
 
 class ActivationKeyScreen(Screen):
+    screen_enum = ACTIVATION_KEY_PAGE
     widget_names = Screen.widget_names + [
                 'activation_key_entry',
                 'organization_entry',
@@ -1608,6 +1750,9 @@ class ActivationKeyScreen(Screen):
         self.pre_done()
         return False
 
+    def back_handler(self):
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
 
 class RefreshSubscriptionsScreen(NoGuiScreen):
 
@@ -1629,6 +1774,7 @@ class RefreshSubscriptionsScreen(NoGuiScreen):
 
     def pre(self):
         self.info.set_property('details-label-txt', self.pre_message)
+        self.info.set_property('register-state', RegisterState.SUBSCRIBING)
         self.async.refresh(self._on_refresh_cb)
         return True
 
@@ -1642,7 +1788,7 @@ class ChooseServerScreen(Screen):
     def __init__(self, reg_info, async_backend, facts, parent_window):
         super(ChooseServerScreen, self).__init__(reg_info, async_backend, facts, parent_window)
 
-        self.button_label = _("Next")
+        self.button_label = _("_Next")
 
         callbacks = {
                 "on_default_button_clicked": self._on_default_button_clicked,
@@ -1656,7 +1802,9 @@ class ChooseServerScreen(Screen):
     def _on_default_button_clicked(self, widget):
         # Default port and prefix are fine, so we can be concise and just
         # put the hostname for RHN:
-        self.server_entry.set_text(config.DEFAULT_HOSTNAME)
+        self.server_entry.set_text("%s:%s%s" % (config.DEFAULT_HOSTNAME,
+            config.DEFAULT_PORT,
+            config.DEFAULT_PREFIX))
 
     def _on_proxy_button_clicked(self, widget):
         # proxy dialog may attempt to resolve proxy and server names, so
@@ -1691,50 +1839,20 @@ class ChooseServerScreen(Screen):
     def apply(self):
         self.stay()
         server = self.server_entry.get_text()
-
-        # TODO: test the values before saving, then update
-        #       self.info and cfg if it works
         try:
-            (hostname, port, prefix) = parse_server_info(server)
-            CFG.set('server', 'hostname', hostname)
-            CFG.set('server', 'port', port)
-            CFG.set('server', 'prefix', prefix)
-
-            self.reset_resolver()
-
-            try:
-                if not is_valid_server_info(hostname, port, prefix):
-                    self.emit('register-error',
-                              _("Unable to reach the server at %s:%s%s") %
-                                (hostname, port, prefix),
-                              None)
-                    return False
-            except MissingCaCertException:
-                self.emit('register-error',
-                          _("CA certificate for subscription service has not been installed."),
-                          None)
-                return False
-
+            (hostname, port, prefix) = parse_server_info(server, CFG)
+            self.info.set_property('hostname', hostname)
+            self.info.set_property('port', port)
+            self.info.set_property('prefix', prefix)
+            self.info.set_property('use_activation_keys', self.activation_key_checkbox.get_active())
         except ServerUrlParseError:
             self.emit('register-error',
                       _("Please provide a hostname with optional port and/or prefix: "
                         "hostname[:port][/prefix]"),
                       None)
             return False
-
-        CFG.save()
-
-        self.info.set_property('hostname', hostname)
-        self.info.set_property('port', port)
-        self.info.set_property('prefix', prefix)
-
-        if self.activation_key_checkbox.get_active():
-            self.emit('move-to-screen', ACTIVATION_KEY_PAGE)
-            return True
-
-        else:
-            self.emit('move-to-screen', CREDENTIALS_PAGE)
-            return True
+        self.emit('move-to-screen', VALIDATE_SERVER_PAGE)
+        return True
 
     def set_server_entry(self, hostname, port, prefix):
         # No need to show port and prefix for hosted:
@@ -1749,12 +1867,81 @@ class ChooseServerScreen(Screen):
         return False
 
 
+class ValidateServerScreen(NoGuiScreen):
+    screen_enum = VALIDATE_SERVER_PAGE
+
+    def _on_validate_server(self, info, error=None):
+        if info:
+            hostname, port, prefix, is_valid = info
+        if error is not None:
+            if isinstance(error, tuple):
+                if isinstance(error[1], MissingCaCertException):
+                    self.emit('register-error',
+                      _("CA certificate for subscription service has not been installed."),
+                      None)
+                if isinstance(error[1], ProxyException):
+                    self.emit('register-error',
+                      _("Proxy connection failed, please check your settings."),
+                      None)
+            else:
+                self.emit('register-error',
+                          _("Error validating server: %s"),
+                          error)
+            self.pre_done()
+            return
+        elif not is_valid:
+            self.emit('register-error',
+                      _("Unable to reach the server at %s:%s%s") %
+                      (hostname, port, prefix),
+                      None)
+            self.pre_done()
+            return
+        CFG.set('server', 'hostname', hostname)
+        CFG.set('server', 'port', port)
+        CFG.set('server', 'prefix', prefix)
+
+        self.pre_done()
+        if self.info.get_property('use_activation_keys'):
+            self.emit('move-to-screen', ACTIVATION_KEY_PAGE)
+            return
+
+        else:
+            self.emit('move-to-screen', CREDENTIALS_PAGE)
+            self.info.set_property('activation-keys', None)
+            return
+
+    def pre(self):
+        msg = _("Validating connection")
+        self.info.set_property('register-status', msg)
+        self.info.set_property('details-label-txt', msg)
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
+        hostname = self.info.get_property('hostname')
+        port = self.info.get_property('port')
+        prefix = self.info.get_property('prefix')
+        self.async.validate_server(hostname, port=port, prefix=prefix, callback=self._on_validate_server)
+        return True
+
+    def back_handler(self):
+        self.info.set_property('register-state', RegisterState.REGISTERING)
+
+
 class AsyncBackend(object):
 
     def __init__(self, backend):
         self.backend = backend
         self.plugin_manager = require(PLUGIN_MANAGER)
         self.queue = Queue.Queue()
+        self._threads = []
+
+    def block_until_complete(self):
+        """Complete outstanding requests."""
+        for thread in self._threads:
+            thread.join()
+
+    def _start_thread(self, thread):
+        thread.start()
+        self._threads.append(thread)
 
     def update(self):
         self.backend.update()
@@ -1819,6 +2006,9 @@ class AsyncBackend(object):
             # TODO: not sure why we pass in a facts.Facts, and call it's
             #       get_facts() three times. The two bracketing plugin calls
             #       are meant to be able to enhance/tweak facts
+            #
+            # TODO: plugin hooks could run in the main thread
+            #       Really anything that doesn't use retval.
             self.plugin_manager.run("pre_register_consumer", name=name,
                                     facts=facts.get_facts())
 
@@ -1826,35 +2016,45 @@ class AsyncBackend(object):
             retval = cp.registerConsumer(name=name, facts=facts.get_facts(),
                                          owner=owner, environment=env,
                                          keys=activation_keys,
-                                          installed_products=installed_mgr.format_for_server())
+                                         installed_products=installed_mgr.format_for_server())
 
             self.plugin_manager.run("post_register_consumer", consumer=retval,
                                     facts=facts.get_facts())
 
+            # TODO: split persisting info into it's own thread
             require(IDENTITY).reload()
             # Facts and installed products went out with the registration
             # request, manually write caches to disk:
             facts.write_cache()
             installed_mgr.write_cache()
 
-            cp = self.backend.cp_provider.get_basic_auth_cp()
+            # Write the identity cert to disk
+            managerlib.persist_consumer_cert(retval)
+            self.backend.update()
 
-            # In practice, the only time this condition should be true is
-            # when we are working with activation keys.  See BZ #888790.
-            if not self.backend.cp_provider.get_basic_auth_cp().username and \
-                not self.backend.cp_provider.get_basic_auth_cp().password:
-                # Write the identity cert to disk
-                managerlib.persist_consumer_cert(retval)
-                self.backend.update()
-                cp = self.backend.cp_provider.get_consumer_auth_cp()
-
-            # FIXME: this looks like we are updating package profile as
-            #        basic auth
-            profile_mgr = require(PROFILE_MANAGER)
-            profile_mgr.update_check(cp, retval['uuid'])
-
+            # FIXME: I don't think we need this at all
             # We have new credentials, restart virt-who
             restart_virt_who()
+
+            # Force all the cert dir backends to update, but mostly
+            # force the identity cert monitor to run, which will
+            # also update Backend. It also blocks until the new
+            # identity is reloaded, so we don't start the selectSLA
+            # screen before it.
+            self.backend.cs.force_cert_check()
+
+            self.queue.put((callback, retval, None))
+        except Exception:
+            self.queue.put((callback, None, sys.exc_info()))
+
+    def _update_package_profile(self, uuid, callback):
+        try:
+            cp = self.backend.cp_provider.get_consumer_auth_cp()
+
+            # NOTE: profile update is using consumer auth with the
+            # new_consumer identity cert, not basic auth as before.
+            profile_mgr = require(PROFILE_MANAGER)
+            retval = profile_mgr.update_check(cp, uuid)
 
             self.queue.put((callback, retval, None))
         except Exception:
@@ -1890,6 +2090,9 @@ class AsyncBackend(object):
 
             # FIXME: this should be a different asyncBackend task
             managerlib.fetch_certificates(self.backend.certlib)
+
+            # make GUI aware of updated certs (instead of waiting for periodic task to detect it)
+            self.backend.cs.force_cert_check()
 
         except Exception:
             # Going to try to update certificates just in case we errored out
@@ -1936,7 +2139,7 @@ class AsyncBackend(object):
             raise NoProductsException()
 
         if len(self.backend.cs.valid_products) == len(self.backend.cs.installed_products) and \
-                len(self.backend.cs.partial_stacks) == 0:
+                len(self.backend.cs.partial_stacks) == 0 and self.backend.cs.system_status != 'partial':
             raise AllProductsCoveredException()
 
         if current_sla:
@@ -1992,46 +2195,96 @@ class AsyncBackend(object):
         except Exception:
             self.queue.put((callback, None, sys.exc_info()))
 
+    def __unregister_consumer(self, consumer_uuid, server_info):
+        # Method to actually do the unregister bits from the server
+        try:
+            old_cp = UEPConnection(**server_info)
+            old_cp.unregisterConsumer(consumer_uuid)
+        except Exception, e:
+            log.exception(e)
+            # Reraise any exception as a RemoteUnregisterException
+            # This will be passed all the way back to the parent window
+            raise RemoteUnregisterException
+
+    def _unregister_consumer(self, consumer_uuid, server_info, callback):
+        try:
+            self.__unregister_consumer(consumer_uuid, server_info)
+            self.queue.put((callback, None, None))
+        except Exception:
+            self.queue.put((callback, None, sys.exc_info()))
+
+    def _validate_server(self, hostname, port, prefix, callback):
+        try:
+            reset_resolver()
+        except Exception, e:
+            log.warn("Error from reset_resolver: %s", e)
+        try:
+            conn = UEPConnection(hostname, int(port), prefix)
+            is_valid = is_valid_server_info(conn)
+            self.queue.put((callback, (hostname, port, prefix, is_valid), None))
+        except (MissingCaCertException, ProxyException):
+            self.queue.put((callback, None, sys.exc_info()))
+
     def get_owner_list(self, username, callback):
         ga_GObject.idle_add(self._watch_thread)
-        threading.Thread(target=self._get_owner_list,
-                         name="GetOwnerListThread",
-                         args=(username, callback)).start()
+        self._start_thread(threading.Thread(target=self._get_owner_list,
+                                            name="GetOwnerListThread",
+                                            args=(username, callback)))
 
     def get_environment_list(self, owner_key, callback):
         ga_GObject.idle_add(self._watch_thread)
-        threading.Thread(target=self._get_environment_list,
-                         name="GetEnvironmentListThread",
-                         args=(owner_key, callback)).start()
+        self._start_thread(threading.Thread(target=self._get_environment_list,
+                                            name="GetEnvironmentListThread",
+                                            args=(owner_key, callback)))
 
     def register_consumer(self, name, facts, owner, env, activation_keys, callback):
         """
         Run consumer registration asyncronously
         """
         ga_GObject.idle_add(self._watch_thread)
-        threading.Thread(target=self._register_consumer,
-                         name="RegisterConsumerThread",
-                         args=(name, facts, owner,
-                               env, activation_keys, callback)).start()
+        self._start_thread(threading.Thread(target=self._register_consumer,
+                                            name="RegisterConsumerThread",
+                                            args=(name, facts, owner,
+                                                  env, activation_keys, callback)))
+
+    def update_package_profile(self, uuid, callback):
+        ga_GObject.idle_add(self._watch_thread)
+        self._start_thread(threading.Thread(target=self._update_package_profile,
+                                            name="UpdatePackageProfileThread",
+                                            args=(uuid, callback)))
 
     def subscribe(self, uuid, current_sla, dry_run_result, callback):
         ga_GObject.idle_add(self._watch_thread)
-        threading.Thread(target=self._subscribe,
-                         name="SubscribeThread",
-                         args=(uuid, current_sla,
-                               dry_run_result, callback)).start()
+        self._start_thread(threading.Thread(target=self._subscribe,
+                                            name="SubscribeThread",
+                                            args=(uuid, current_sla,
+                                                  dry_run_result, callback)))
 
     def find_service_levels(self, consumer_uuid, facts, callback):
         ga_GObject.idle_add(self._watch_thread)
-        threading.Thread(target=self._find_service_levels,
-                         name="FindServiceLevelsThread",
-                         args=(consumer_uuid, facts, callback)).start()
+        self._start_thread(threading.Thread(target=self._find_service_levels,
+                                            name="FindServiceLevelsThread",
+                                            args=(consumer_uuid, facts, callback)))
 
     def refresh(self, callback):
         ga_GObject.idle_add(self._watch_thread)
-        threading.Thread(target=self._refresh,
-                         name="RefreshThread",
-                         args=(callback,)).start()
+        self._start_thread(threading.Thread(target=self._refresh,
+                                            name="RefreshThread",
+                                            args=(callback,)))
+
+    def unregister_consumer(self, consumer_uuid, server_info, callback):
+        ga_GObject.idle_add(self._watch_thread)
+        self._start_thread(threading.Thread(target=self._unregister_consumer,
+                                            name="UnregisterThread",
+                                            args=(consumer_uuid,
+                                                  server_info,
+                                                  callback)))
+
+    def validate_server(self, hostname, port, prefix, callback):
+        ga_GObject.idle_add(self._watch_thread)
+        self._start_thread(threading.Thread(target=self._validate_server,
+                                            name="ValidateServerThread",
+                                            args=(hostname, port, prefix, callback)))
 
 
 # TODO: make this a more informative 'summary' page.
@@ -2065,7 +2318,7 @@ class InfoScreen(Screen):
 
     def __init__(self, reg_info, async_backend, facts, parent_window):
         super(InfoScreen, self).__init__(reg_info, async_backend, facts, parent_window)
-        self.button_label = _("Next")
+        self.button_label = _("_Next")
         callbacks = {"on_why_register_button_clicked":
                      self._on_why_register_button_clicked,
                      "on_back_to_reg_button_clicked":

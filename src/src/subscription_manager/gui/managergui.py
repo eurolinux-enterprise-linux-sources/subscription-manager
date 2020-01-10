@@ -26,7 +26,10 @@ import logging
 import subprocess
 import urllib2
 import webbrowser
-
+import os
+import socket
+import threading
+import time
 
 import rhsm.config as config
 
@@ -39,12 +42,14 @@ from subscription_manager.facts import Facts
 from subscription_manager.hwprobe import ClassicCheck
 from subscription_manager import managerlib
 from subscription_manager.utils import get_client_versions, get_server_versions, parse_baseurl_info, restart_virt_who
+from subscription_manager.utils import print_error
 
 from subscription_manager.gui import factsgui
 from subscription_manager.gui import messageWindow
 from subscription_manager.gui import networkConfig
 from subscription_manager.gui import redeem
 from subscription_manager.gui import registergui
+from subscription_manager.gui import utils
 from subscription_manager.gui import widgets
 
 from subscription_manager.gui.about import AboutDialog
@@ -56,6 +61,7 @@ from subscription_manager.gui.preferences import PreferencesDialog
 from subscription_manager.gui.utils import handle_gui_exception, linkify
 from subscription_manager.gui.reposgui import RepositoriesDialog
 from subscription_manager.overrides import Overrides
+from subscription_manager.cli import system_exit
 
 
 _ = gettext.gettext
@@ -65,12 +71,28 @@ gettext.textdomain("rhsm")
 #Gtk.glade.bindtextdomain("rhsm")
 #Gtk.Window.set_default_icon_name("subscription-manager")
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 cfg = config.initConfig()
 
 ONLINE_DOC_URL_TEMPLATE = "https://access.redhat.com/knowledge/docs/Red_Hat_Subscription_Management/?locale=%s"
 ONLINE_DOC_FALLBACK_URL = "https://access.redhat.com/knowledge/docs/Red_Hat_Subscription_Management/"
+
+# every GUI browser from https://docs.python.org/2/library/webbrowser.html with updates within last 2 years of writing
+PREFERRED_BROWSERS = [
+    "mozilla",
+    "firefox",
+    "epiphany",
+    "konqueror",
+    "opera",
+    "google-chrome",
+    "chrome",
+    "chromium",
+    "chromium-browser",
+]
+
+# inform user of the URL in case our detection is outdated
+NO_BROWSER_MESSAGE = _("Browser not detected. Documentation URL is %s.")
 
 
 class Backend(object):
@@ -135,7 +157,8 @@ class MainWindow(widgets.SubmanBaseWidget):
     """
     widget_names = ['main_window', 'notebook', 'system_name_label',
                     'register_menu_item', 'unregister_menu_item',
-                    'redeem_menu_item', 'settings_menu_item', 'repos_menu_item']
+                    'redeem_menu_item', 'settings_menu_item', 'repos_menu_item',
+                    'import_cert_menu_item']
     gui_file = "mainwindow"
 
     def log_server_version(self, uep):
@@ -144,11 +167,29 @@ class MainWindow(widgets.SubmanBaseWidget):
         # Remove this from the GTK main loop
         return False
 
+    def _on_proxy_error_dialog_response(self, window, response):
+        if response:
+            self.network_config_dialog.show()
+        else:
+            system_exit(os.EX_UNAVAILABLE)
+
+    def _exit(self, *args):
+        system_exit(0)
+
     def __init__(self, backend=None, facts=None,
                  ent_dir=None, prod_dir=None,
                  auto_launch_registration=False):
         super(MainWindow, self).__init__()
 
+        if not self.test_proxy_connection():
+            print_error(_("Proxy connection failed, please check your settings."))
+            error_dialog = messageWindow.ContinueDialog(_("Proxy connection failed, please check your settings."),
+                                                        self._get_window())
+            error_dialog.connect("response", self._on_proxy_error_dialog_response)
+            self.network_config_dialog = networkConfig.NetworkConfigDialog()
+            self.network_config_dialog.saveButton.connect("clicked", self._exit)
+            self.network_config_dialog.cancelButton.connect("clicked", self._exit)
+            return
         self.backend = backend or Backend()
         self.identity = require(IDENTITY)
 
@@ -174,10 +215,12 @@ class MainWindow(widgets.SubmanBaseWidget):
         settings.set_long_property('gtk-recent-files-max-age', 0,
                                    "%s:%s" % (__name__, type(self).__name__))
 
+        ga_Gtk.Window.set_default_icon_name("subscription-manager")
+
         self.product_dir = prod_dir or self.backend.product_dir
         self.entitlement_dir = ent_dir or self.backend.entitlement_dir
 
-        self.system_facts_dialog = factsgui.SystemFactsDialog(self.facts)
+        self.system_facts_dialog = factsgui.SystemFactsDialog(self.facts, update_callback=self._handle_facts_updated)
 
         self.preferences_dialog = PreferencesDialog(self.backend,
                                                     self._get_window())
@@ -234,22 +277,11 @@ class MainWindow(widgets.SubmanBaseWidget):
             "on_quit_menu_item_activate": ga_Gtk.main_quit,
         })
 
-        # TODO: why is this defined in the init scope?
-        # When something causes cert_sorter to upate it's state, refresh the gui
-        # The cert directories being updated will cause this (either noticed
-        # from a timer, or via cert_sort.force_cert_check).
-        def on_cert_sorter_cert_change():
-            # Update installed products
-            self.installed_tab.update_products()
-            self.installed_tab._set_validity_status()
-            # Update attached subs
-            self.my_subs_tab.update_subscriptions()
-            # Update main window
-            self.refresh()
-            # Reset repos dialog, see bz 1132919
-            self.repos_dialog = RepositoriesDialog(self.backend, self._get_window())
+        # various state tracking for async operations
+        self._show_overrides = False
+        self._can_redeem = False
 
-        self.backend.cs.add_callback(on_cert_sorter_cert_change)
+        self.backend.cs.add_callback(self.on_cert_sorter_cert_change)
 
         self.main_window.show_all()
 
@@ -263,7 +295,9 @@ class MainWindow(widgets.SubmanBaseWidget):
         # managergui needs cert_sort.cert_monitor.run_check() to run
         # on a timer to detect cert changes from outside the gui
         # (via rhsmdd for example, or manually provisioned).
-        ga_GLib.timeout_add(2000, self._on_cert_check_timer)
+        cert_monitor_thread = threading.Thread(target=self._cert_check_timer, name="CertMonitorThread")
+        cert_monitor_thread.daemon = True
+        cert_monitor_thread.start()
 
         if auto_launch_registration and not self.registered():
             self._register_item_clicked(None)
@@ -271,9 +305,33 @@ class MainWindow(widgets.SubmanBaseWidget):
     def registered(self):
         return self.identity.is_valid()
 
-    def _on_cert_check_timer(self):
-        self.backend.on_cert_check_timer()
-        return True
+    def _cert_check_timer(self):
+        while True:
+            self.backend.on_cert_check_timer()
+            time.sleep(2.0)
+
+    def _cert_change_update(self):
+        # Update installed products
+        self.installed_tab.refresh()
+        # Update attached subs
+        self.my_subs_tab.refresh()
+        # Update main window
+        self.refresh()
+        # Reset repos dialog, see bz 1132919
+        self.repos_dialog = RepositoriesDialog(self.backend, self._get_window())
+
+    # When something causes cert_sorter to update it's state, refresh the gui
+    # The cert directories being updated will cause this (either noticed
+    # from a timer, or via cert_sort.force_cert_check).
+    def on_cert_sorter_cert_change(self):
+        # gather data used in GUI refresh
+        self._show_overrides = self._should_show_overrides()
+        self._can_redeem = self._should_show_redeem()
+        self.installed_tab.update()
+        self.my_subs_tab.update_subscriptions(update_gui=False)  # don't update GUI since we're in a different thread
+
+        # queue up in the main thread since the cert check may be done by another thread.
+        ga_GLib.idle_add(self._cert_change_update)
 
     def _on_sla_back_button_press(self):
         self._perform_unregister()
@@ -329,10 +387,19 @@ class MainWindow(widgets.SubmanBaseWidget):
             self.register_menu_item.set_sensitive(False)
             self.unregister_menu_item.set_sensitive(True)
             self.settings_menu_item.set_sensitive(True)  # preferences
+            self.import_cert_menu_item.set_sensitive(False)
         else:
             self.register_menu_item.set_sensitive(True)
             self.unregister_menu_item.set_sensitive(False)
             self.settings_menu_item.set_sensitive(False)
+            self.import_cert_menu_item.set_sensitive(True)
+        if self._show_overrides:
+            self.repos_menu_item.set_sensitive(True)
+        else:
+            self.repos_menu_item.set_sensitive(False)
+
+    def _should_show_overrides(self):
+        is_registered = self.registered()
 
         show_overrides = False
         try:
@@ -343,12 +410,15 @@ class MainWindow(widgets.SubmanBaseWidget):
             log.debug("Failed to check if the server supports resource content_overrides")
             log.debug(e)
 
-        if show_overrides:
-            self.repos_menu_item.set_sensitive(True)
-        else:
-            self.repos_menu_item.set_sensitive(False)
+        return show_overrides
 
     def _show_redemption_buttons(self):
+        if self._can_redeem:
+            self.redeem_menu_item.set_sensitive(True)
+        else:
+            self.redeem_menu_item.set_sensitive(False)
+
+    def _should_show_redeem(self):
         # Check if consumer can redeem a subscription - if an identity cert exists
         can_redeem = False
 
@@ -359,16 +429,14 @@ class MainWindow(widgets.SubmanBaseWidget):
             except Exception:
                 can_redeem = False
 
-        if can_redeem:
-            self.redeem_menu_item.set_sensitive(True)
-        else:
-            self.redeem_menu_item.set_sensitive(False)
+        return can_redeem
 
     def _register_item_clicked(self, widget):
         registration_dialog = registergui.RegisterDialog(self.backend, self.facts)
         registration_dialog.register_dialog.connect('destroy',
                                                     self._on_dialog_destroy,
                                                     widget)
+        registration_dialog.window.set_transient_for(self._get_window())
 
         if registration_dialog and widget:
             widget.set_sensitive(False)
@@ -377,7 +445,8 @@ class MainWindow(widgets.SubmanBaseWidget):
         registration_dialog.show()
 
     def _on_dialog_destroy(self, obj, widget):
-        if widget:
+        # bz#1382897 make sure register menu item is left in appropriate state
+        if (widget is not self.register_menu_item or not self.registered()) and widget:
             widget.set_sensitive(True)
         return False
 
@@ -448,6 +517,7 @@ class MainWindow(widgets.SubmanBaseWidget):
         autobind_wizard.register_dialog.connect('destroy',
                                                 self._on_dialog_destroy,
                                                 widget)
+        autobind_wizard.window.set_transient_for(self._get_window())
 
         if autobind_wizard and widget:
             widget.set_sensitive(False)
@@ -462,7 +532,9 @@ class MainWindow(widgets.SubmanBaseWidget):
     def _getting_started_item_clicked(self, widget):
         try:
             # unfortunately, Gtk.show_uri does not work in RHEL 5
-            subprocess.call(["gnome-open", "ghelp:subscription-manager"])
+            DEVNULL = open(os.devnull, 'w')
+            subprocess.call(["gnome-open", "ghelp:subscription-manager"],
+                            stderr=DEVNULL)
         except Exception, e:
             # if we can't open it, it's probably because the user didn't
             # install the docs, or yelp. no need to bother them.
@@ -473,7 +545,17 @@ class MainWindow(widgets.SubmanBaseWidget):
         about.show()
 
     def _online_docs_item_clicked(self, widget):
-        webbrowser.open_new(self._get_online_doc_url())
+        browser = None
+        for possible_browser in PREFERRED_BROWSERS:
+            try:
+                browser = webbrowser.get(possible_browser)
+                break
+            except webbrowser.Error:
+                pass
+        if browser is None:
+            utils.show_error_window(NO_BROWSER_MESSAGE % (self._get_online_doc_url()))
+        else:
+            webbrowser.open_new(self._get_online_doc_url())
 
     def _quit_item_clicked(self):
         self.hide()
@@ -505,3 +587,26 @@ class MainWindow(widgets.SubmanBaseWidget):
             # Use the default if there is no translation.
             url = ONLINE_DOC_FALLBACK_URL
         return url
+
+    def _handle_facts_updated(self):
+        # see bz 1323271 - update compliance on update of facts
+        self.backend.cs.load()
+        self.backend.cs.notify()
+
+    def test_proxy_connection(self):
+        result = None
+        if not cfg.get("server", "proxy_hostname"):
+            return True
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(10)
+            result = s.connect_ex((cfg.get("server", "proxy_hostname"), int(cfg.get("server", "proxy_port") or config.DEFAULT_PROXY_PORT)))
+        except Exception as e:
+            log.info("Attempted bad proxy: %s" % e)
+        finally:
+            s.close()
+        if result:
+            log.error("proxy connetion error: %s" % result)
+            return False
+        else:
+            return True

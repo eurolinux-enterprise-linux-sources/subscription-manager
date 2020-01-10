@@ -22,7 +22,7 @@ from subscription_manager import certlib
 from subscription_manager import entcertlib
 from subscription_manager import injection as inj
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 
 class HealingActionInvoker(certlib.BaseActionInvoker):
@@ -83,6 +83,7 @@ class HealingUpdateAction(object):
             today = datetime.datetime.now(certificate.GMT())
             tomorrow = today + datetime.timedelta(days=1)
             valid_today = False
+            valid_tomorrow = False
 
             # Check if we're invalid today and heal if so. If we are
             # valid, see if 24h from now is greater than our "valid until"

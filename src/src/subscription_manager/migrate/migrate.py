@@ -20,6 +20,7 @@ import libxml2
 import logging
 import os
 import re
+import readline
 import shutil
 import subprocess
 import sys
@@ -27,7 +28,7 @@ import sys
 import rhsm.config
 
 from datetime import datetime
-from M2Crypto.SSL import SSLError
+from rhsm.https import ssl
 
 from rhn import rpclib
 
@@ -35,10 +36,6 @@ from rhsm.connection import RemoteServerException, RestlibException
 from rhsm.utils import ServerUrlParseError
 
 _ = gettext.gettext
-
-_LIBPATH = "/usr/share/rhsm"
-if _LIBPATH not in sys.path:
-    sys.path.append(_LIBPATH)
 
 from subscription_manager import injection as inj
 from subscription_manager.cli import system_exit
@@ -53,20 +50,25 @@ _RHNLIBPATH = "/usr/share/rhn"
 if _RHNLIBPATH not in sys.path:
     sys.path.append(_RHNLIBPATH)
 
+_UP2DATE_CLIENT_CONFIG_ERROR = _("Could not find up2date_client.config module! "
+                                 "Perhaps this script was already executed with --remove-rhn-packages?")
+_UP2DATE_CLIENT_RHNCHANNEL_ERROR = _("Could not find up2date_client.config module! "
+                                     "Perhaps this script was already executed with --remove-rhn-packages?")
+
 # Don't raise ImportErrors so we can run the unit tests on Fedora.
 try:
     from up2date_client.config import initUp2dateConfig
 except ImportError:
     def initUp2dateConfig():
-        raise NotImplementedError(_("Could not find up2date_client.config module!"))
+        raise NotImplementedError(_UP2DATE_CLIENT_CONFIG_ERROR)
 
 try:
     from up2date_client.rhnChannel import getChannels
 except ImportError:
     def getChannels():
-        raise NotImplementedError(_("Could not find up2date_client.rhnChannel module!"))
+        raise NotImplementedError(_UP2DATE_CLIENT_RHNCHANNEL_ERROR)
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 SEE_LOG_FILE = _(u"See /var/log/rhsm/rhsm.log for more details.")
 
@@ -80,6 +82,24 @@ DOUBLE_MAPPED = "rhel-.*?-(client|server)-dts-(5|6)-beta(-debuginfo)?"
 # The (?!-beta) bit is a negative lookahead assertion.  So we won't match
 # if the 5 or 6 is followed by the word "-beta"
 SINGLE_MAPPED = "rhel-.*?-(client|server)-dts-(5|6)(?!-beta)(-debuginfo)?"
+
+LEGACY_DAEMONS = ["osad", "rhnsd"]
+
+LEGACY_PACKAGES = [
+    "osad",
+    "rhn-check",
+    "rhn-client-tools",  # provides up2date_client which means this script won't work after uninstalled
+    "rhncfg",
+    "rhncfg-actions",
+    "rhncfg-client",
+    "rhncfg-management",
+    "rhn-setup",
+    "rhnpush",
+    "rhnsd",
+    "spacewalk-abrt",
+    "spacewalk-oscap",
+    "yum-rhn-plugin"
+]
 
 
 class InvalidChoiceError(Exception):
@@ -97,6 +117,7 @@ class Menu(object):
         while True:
             self.display()
             selection = raw_input("? ").strip()
+            readline.clear_history()
             try:
                 return self._get_item(selection)
             except InvalidChoiceError:
@@ -164,6 +185,7 @@ class MigrationEngine(object):
     def authenticate(self, username, password, user_prompt, pw_prompt):
         if not username:
             username = raw_input(user_prompt).strip()
+            readline.clear_history()
 
         if not password:
             password = getpass.getpass(prompt=pw_prompt)
@@ -262,7 +284,7 @@ class MigrationEngine(object):
 
         try:
             self.cp.getStatus()
-        except SSLError, e:
+        except ssl.SSLError as e:
             print _("The CA certificate for the destination server has not been installed.")
             system_exit(os.EX_SOFTWARE, CONNECTION_FAILURE % e)
         except Exception, e:
@@ -285,6 +307,7 @@ class MigrationEngine(object):
                 org_input = owner_list[0]['key']
             else:
                 org_input = raw_input(_("Org: ")).strip()
+                readline.clear_history()
 
             org = None
             for owner_data in owner_list:
@@ -314,6 +337,7 @@ class MigrationEngine(object):
                 env_input = environment_list[0]['name']
             else:
                 env_input = raw_input(_("Environment: ")).strip()
+                readline.clear_history()
 
             for env_data in environment_list:
                 # See BZ #978001
@@ -366,7 +390,7 @@ class MigrationEngine(object):
             rpc_session.system.getDetails(session_key, self.system_id)
         except Exception, e:
             log.exception(e)
-            system_exit(1, _("You do not have access to system %s.  " % self.system_id) + SEE_LOG_FILE)
+            system_exit(1, _("You do not have access to system %s.  ") % self.system_id + SEE_LOG_FILE)
 
     def resolve_base_channel(self, label, rpc_session, session_key):
         try:
@@ -767,6 +791,48 @@ class MigrationEngine(object):
             command = "subscription-manager repos --help"
             print _("Please ensure system has subscriptions attached, and see '%s' to enable additional repositories") % command
 
+    def is_using_systemd(self):
+        release_number = int(self.get_release().partition('-')[-1])
+        return release_number > 6
+
+    def is_daemon_installed(self, daemon, using_systemd):
+        if using_systemd:
+            return subprocess.call("systemctl list-unit-files %s.service | grep %s > /dev/null 2>&1" % (daemon, daemon), shell=True) == 0
+        else:
+            return os.path.exists("/etc/init.d/%s" % daemon)
+
+    def is_daemon_running(self, daemon, using_systemd):
+        if using_systemd:
+            return subprocess.call("systemctl is-active --quiet %s" % daemon, shell=True) == 0
+        else:
+            return subprocess.call("service %s status > /dev/null 2>&1" % daemon, shell=True) == 0
+
+    def handle_legacy_daemons(self, using_systemd):
+        print _("Stopping and disabling legacy services...")
+        log.info("Attempting to stop and disable legacy services: %s" % " ".join(LEGACY_DAEMONS))
+        for daemon in LEGACY_DAEMONS:
+            if self.is_daemon_installed(daemon, using_systemd):
+                self.disable_daemon(daemon, using_systemd)
+                if self.is_daemon_running(daemon, using_systemd):
+                    self.stop_daemon(daemon, using_systemd)
+
+    def stop_daemon(self, daemon, using_systemd):
+        if using_systemd:
+            subprocess.call(["systemctl", "stop", daemon])
+        else:
+            subprocess.call(["service", daemon, "stop"])
+
+    def disable_daemon(self, daemon, using_systemd):
+        if using_systemd:
+            subprocess.call(["systemctl", "disable", daemon])
+        else:
+            subprocess.call(["chkconfig", daemon, "off"])
+
+    def remove_legacy_packages(self):
+        print _("Removing legacy packages...")
+        log.info("Attempting to remove legacy packages: %s" % " ".join(LEGACY_PACKAGES))
+        subprocess.call(["yum", "remove", "-q", "-y"] + LEGACY_PACKAGES)
+
     def main(self, args=None):
         self.get_auth()
         self.transfer_http_proxy_settings()
@@ -812,6 +878,11 @@ class MigrationEngine(object):
             # For the "keep" case, we just leave everything alone.
             pass
 
+        using_systemd = self.is_using_systemd()
+        self.handle_legacy_daemons(using_systemd)
+        if self.options.remove_legacy_packages:
+            self.remove_legacy_packages()
+
         identity = self.register(self.destination_creds, org, environment)
         if identity:
             self.enable_extra_channels(subscribed_channels)
@@ -824,6 +895,8 @@ def add_parser_options(parser, five_to_six_script=False):
     parser.add_option("-s", "--servicelevel", dest="service_level",
         help=_("service level to follow when attaching subscriptions, for no service "
             "level use --servicelevel=\"\""))
+    parser.add_option("--remove-rhn-packages", action="store_true", default=False, dest="remove_legacy_packages",
+                      help=_("remove legacy packages"))
     # See BZ 915847 - some users want to connect to RHN with a proxy but to RHSM without a proxy
     parser.add_option("--no-proxy", action="store_true", dest='noproxy',
         help=_("don't use legacy proxy settings with destination server"))
@@ -879,6 +952,12 @@ def validate_options(options):
     if options.service_level and not options.auto:
         # TODO Need to explain why this restriction exists.
         system_exit(os.EX_USAGE, _("The --servicelevel and --no-auto options cannot be used together."))
+
+    if options.remove_legacy_packages and options.registration_state == 'keep' and not options.five_to_six:
+        system_exit(os.EX_USAGE, _("The --remove-rhn-packages and --keep options cannot be used together."))
+
+    if options.remove_legacy_packages and options.registration_state in ['keep', 'unentitle'] and options.five_to_six:
+        system_exit(os.EX_USAGE, _("The --remove-rhn-packages option must be used with --registration-state=purge."))
 
 
 def is_hosted():

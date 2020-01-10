@@ -27,7 +27,7 @@ from subscription_manager.exceptions import ExceptionMapper
 import rhsm.connection as connection
 from subscription_manager.gui import messageWindow
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 # we need gtk 2.18+ to do the right markup in linkify
 MIN_GTK_MAJOR = 2
@@ -139,7 +139,7 @@ def format_exception(e, msg, format_msg=True, log_msg=None):
         # Get the class instance of the exception
         e = e[1]
     message = None
-    exception_mapper = ExceptionMapper()
+    exception_mapper = GuiExceptionMapper()
     mapped_message = exception_mapper.get_message(e)
     if mapped_message:
         message = format_mapped_message(e, msg, mapped_message, format_msg=format_msg)
@@ -319,3 +319,9 @@ class AsyncWidgetUpdater(object):
         threading.Thread(target=self.worker, name="AsyncWidgetUpdaterThread",
                          args=(widget_update, backend_method, args,
                                kwargs, exception_msg, callback)).start()
+
+
+class GuiExceptionMapper(ExceptionMapper):
+
+    def format_restlib_exception(self, restlib_exception, message_template):
+        return ga_GObject.markup_escape_text(restlib_exception.msg)

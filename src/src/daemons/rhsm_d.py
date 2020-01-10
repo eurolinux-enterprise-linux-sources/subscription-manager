@@ -38,15 +38,14 @@ import syslog
 import dbus
 import dbus.service
 import dbus.glib
+import decorator
 import logging
 import traceback
-
-sys.path.append("/usr/share/rhsm")
 
 from subscription_manager import ga_loader
 ga_loader.init_ga()
 
-#from gi.repository import GObject
+# from gi.repository import GObject
 log = logging.getLogger("rhsm-app.rhsmd")
 
 from subscription_manager import logutil
@@ -71,7 +70,6 @@ init_dep_injection()
 
 from subscription_manager.branding import get_branding
 from subscription_manager.injection import require, IDENTITY, CERT_SORTER, RHSM_ICON_CACHE
-from subscription_manager.cache import RhsmIconCache
 from subscription_manager.hwprobe import ClassicCheck
 from subscription_manager.i18n_optparse import OptionParser, \
     WrappedIndentedHelpFormatter, USAGE
@@ -136,13 +134,43 @@ def check_if_ran_once(checker, loop):
     return True
 
 
+@decorator.decorator
+def ensure_exit(func, *args, **kwargs):
+    """
+    A decorator ensuring the decorated method exits the main loop after
+    running (even if it fails with an exception)
+    :param func: the method that will be decorated. Should be a method of
+    StatusChecker
+    :return:
+    """
+    try:
+        return func(*args, **kwargs)
+    finally:
+        try:
+            status_checker = args[0]  # Should be StatusChecker instance
+            status_checker.has_run = True
+            status_checker.watchdog()
+        except IndexError:
+            log.exception("Cannot get reference to StatusChecker "
+                          "instance.\nUnable to quit out of main loop.\n "
+                          "rhsmd may not quit automatically.")
+        except AttributeError:
+            log.exception("Failed to quit mainloop.\nWas 'ensure_exit' used "
+                          "to decorate a method of a class that does not have"
+                          "a main loop?")
+
+
 class StatusChecker(dbus.service.Object):
+    # NOTE: All methods of this class that need to exit the main loop
+    # will need the annotation @ensure_exit. To avoid issues with the
+    # dbus.service.method annotation, add annotations earlier in the
+    # annotation stack.
 
     def __init__(self, bus, keep_alive, force_signal, loop):
         name = dbus.service.BusName("com.redhat.SubscriptionManager", bus)
         dbus.service.Object.__init__(self, name, "/EntitlementStatus")
         self.has_run = False
-        #this will get set after first invocation
+        # this will get set after first invocation
         self.rhsm_icon_cache = require(RHSM_ICON_CACHE)
         self.keep_alive = keep_alive
         self.force_signal = force_signal
@@ -155,8 +183,8 @@ class StatusChecker(dbus.service.Object):
         log.debug("D-Bus signal com.redhat.SubscriptionManager.EntitlementStatus.entitlement_status_changed emitted")
         debug("signal fired! code is " + str(status_code))
 
-    #this is so we can guarantee exit after the dbus stuff is done, since
-    #certain parts of that are async
+    # this is so we can guarantee exit after the dbus stuff is done, since
+    # certain parts of that are async
     def watchdog(self):
         if not self.keep_alive:
             ga_GObject.idle_add(check_if_ran_once, self, self.loop)
@@ -164,6 +192,7 @@ class StatusChecker(dbus.service.Object):
     @dbus.service.method(
         dbus_interface="com.redhat.SubscriptionManager.EntitlementStatus",
         out_signature='i')
+    @ensure_exit
     def check_status(self):
         """
         returns: 0 if entitlements are valid, 1 if not valid,
@@ -176,13 +205,12 @@ class StatusChecker(dbus.service.Object):
             self.entitlement_status_changed(status)
         self.rhsm_icon_cache.data = status
         self.rhsm_icon_cache.write_cache()
-        self.has_run = True
-        self.watchdog()
         return status
 
     @dbus.service.method(
             dbus_interface="com.redhat.SubscriptionManager.EntitlementStatus",
             in_signature='i')
+    @ensure_exit
     def update_status(self, status):
         log.debug("D-Bus interface com.redhat.SubscriptionManager.EntitlementStatus.update_status called with status = %s" % status)
         pre_result = pre_check_status(self.force_signal)
@@ -195,8 +223,6 @@ class StatusChecker(dbus.service.Object):
             self.entitlement_status_changed(status)
         self.rhsm_icon_cache.data = status
         self.rhsm_icon_cache.write_cache()
-        self.has_run = True
-        self.watchdog()
 
 
 def parse_force_signal(cli_arg):

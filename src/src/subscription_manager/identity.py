@@ -22,7 +22,7 @@ from subscription_manager.certdirectory import Path
 
 CFG = initConfig()
 
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 
 class ConsumerIdentity:
@@ -35,13 +35,13 @@ class ConsumerIdentity:
     KEY = 'key.pem'
     CERT = 'cert.pem'
 
-    @classmethod
-    def keypath(cls):
-        return str(Path.join(cls.PATH, cls.KEY))
+    @staticmethod
+    def keypath():
+        return str(Path.join(ConsumerIdentity.PATH, ConsumerIdentity.KEY))
 
-    @classmethod
-    def certpath(cls):
-        return str(Path.join(cls.PATH, cls.CERT))
+    @staticmethod
+    def certpath():
+        return str(Path.join(ConsumerIdentity.PATH, ConsumerIdentity.CERT))
 
     @classmethod
     def read(cls):
@@ -72,7 +72,7 @@ class ConsumerIdentity:
     def __init__(self, keystring, certstring):
         self.key = keystring
         # TODO: bad variables, cert should be the certificate object, x509 is
-        # used elsewhere for the m2crypto object of the same name.
+        # used elsewhere for the rhsm._certificate object of the same name.
         self.cert = certstring
         self.x509 = create_from_pem(certstring)
 

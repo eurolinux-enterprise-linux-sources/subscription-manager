@@ -12,6 +12,10 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
+try:
+    import unittest2 as unittest
+except ImportError:
+    import unittest
 
 from cStringIO import StringIO
 import errno
@@ -19,9 +23,10 @@ import mock
 import os
 import shutil
 import tempfile
-import unittest
 import zipfile
 from zipfile import ZipFile
+
+from subscription_manager.i18n_optparse import OptionParser
 
 import manifestdata
 from rct.manifest_commands import CatManifestCommand
@@ -65,6 +70,10 @@ class RCTManifestCommandTests(SubManFixture):
 
     def test_cat_manifest(self):
         catman = CatManifestCommand()
+        parser = OptionParser()
+        parser.add_option("--no-content")
+        (options, args) = parser.parse_args([])
+        catman.options = options
         catman.args = [_build_valid_manifest()]
 
         with Capture() as cap:

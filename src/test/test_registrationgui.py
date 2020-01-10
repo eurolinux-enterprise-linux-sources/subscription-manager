@@ -1,12 +1,13 @@
 
-from mock import Mock
+from mock import Mock, patch
 
 from fixture import SubManFixture
 
 from stubs import StubBackend, StubFacts
 from subscription_manager.gui.registergui import RegisterWidget, RegisterInfo,  \
-    CredentialsScreen, ActivationKeyScreen, ChooseServerScreen, \
+    CredentialsScreen, ActivationKeyScreen, ChooseServerScreen, AsyncBackend, \
     CREDENTIALS_PAGE, CHOOSE_SERVER_PAGE
+from subscription_manager.gui.autobind import AllProductsCoveredException
 
 from subscription_manager.ga import GObject as ga_GObject
 from subscription_manager.ga import Gtk as ga_Gtk
@@ -116,6 +117,14 @@ class RegisterWidgetTests(SubManFixture):
 
         ga_Gtk.main_quit()
 
+    def test_screen_history_empty(self):
+        self.rs.initialize()
+        self.assertTrue(self.rs.applied_screen_history.is_empty())
+        self.rs.apply_current_screen()
+        self.assertFalse(self.rs.applied_screen_history.is_empty())
+        self.rs._pop_last_screen()
+        self.assertTrue(self.rs.applied_screen_history.is_empty())
+
 
 def mock_parent():
     parent = Mock()
@@ -202,3 +211,45 @@ class ChooseServerScreenTests(SubManFixture):
         self.screen.server_entry.set_text("subscription.rhsm.redhat.com:443/baz")
         self.assertTrue(self.screen.activation_key_checkbox.get_property('sensitive'))
         self.assertTrue(self.screen.activation_key_checkbox.get_property('active'))
+
+    @patch('subscription_manager.gui.registergui.config')
+    def test__on_default_button_clicked(self, config):
+        config.DEFAULT_HOSTNAME = "subscription.rhsm.redhat.com"
+        config.DEFAULT_PORT = '443'
+        config.DEFAULT_PREFIX = "/subscription"
+
+        non_default = "foo.bar:8443/baz"
+        expected = "%s:%s%s" % (config.DEFAULT_HOSTNAME,
+            config.DEFAULT_PORT,
+            config.DEFAULT_PREFIX)
+        self.screen.server_entry.set_text(non_default)
+        self.screen._on_default_button_clicked(None)  # The widget param is not used
+        result = self.screen.server_entry.get_text()
+        self.assertEqual(expected, result)
+
+
+class AsyncBackendTests(SubManFixture):
+    def setUp(self):
+        self.backend = StubBackend()
+        self.asyncBackend = AsyncBackend(self.backend)
+        super(AsyncBackendTests, self).setUp()
+
+    def test_auto_system_complete(self):
+        self.backend.cp_provider.get_consumer_auth_cp().getConsumer = \
+           Mock(return_value={"serviceLevel": "", "owner": {"key": "admin"}})
+        self.backend.cs.valid_products = ['RH001', 'RH002']
+        self.backend.cs.installed_products = ['RH001', 'RH002']
+        self.backend.cs.partial_stacks = []
+        self.backend.cs.system_status = 'valid'
+        self.backend.cp_provider.get_consumer_auth_cp().getServiceLevelList = Mock(return_value=[])
+        self.assertRaises(AllProductsCoveredException, self.asyncBackend._find_suitable_service_levels, '12345', {})
+
+    def test_auto_system_partial(self):
+        self.backend.cp_provider.get_consumer_auth_cp().getConsumer = \
+           Mock(return_value={"serviceLevel": "", "owner": {"key": "admin"}})
+        self.backend.cs.valid_products = ['RH001', 'RH002']
+        self.backend.cs.installed_products = ['RH001', 'RH002']
+        self.backend.cs.partial_stacks = []
+        self.backend.cs.system_status = 'partial'
+        self.backend.cp_provider.get_consumer_auth_cp().getServiceLevelList = Mock(return_value=[])
+        self.asyncBackend._find_suitable_service_levels('12345', {})

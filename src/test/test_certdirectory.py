@@ -12,9 +12,12 @@
 # granted to use or replicate Red Hat trademarks that are incorporated
 # in this software or its documentation.
 #
+try:
+    import unittest2 as unittest
+except ImportError:
+    import unittest
 
 import tempfile
-import unittest
 import os
 
 from mock import patch, MagicMock
@@ -28,10 +31,6 @@ from subscription_manager.repolib import RepoFile
 from subscription_manager.productid import ProductDatabase
 
 
-def dummy_exists(filename):
-    return True
-
-
 class PathTests(unittest.TestCase):
     """
     Tests for the certlib Path class, changes to it's ROOT setting can affect
@@ -39,14 +38,13 @@ class PathTests(unittest.TestCase):
     """
 
     def setUp(self):
-        # monkey patch os.path.exists, be careful, this can break things
-        # including python-nose if we don't set it back in tearDown.
-        self.actual_exists = os.path.exists
-        os.path.exists = dummy_exists
+        patcher = patch('os.path.exists')
+        self.addCleanup(patcher.stop)
+        mock_exists = patcher.start()
+        mock_exists.return_value = True
 
     def tearDown(self):
         Path.ROOT = "/"
-        os.path.exists = self.actual_exists
 
     def test_normal_root(self):
         # this is the default, but have to set it as other tests can modify

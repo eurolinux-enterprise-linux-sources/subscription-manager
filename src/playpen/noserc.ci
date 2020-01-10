@@ -1,7 +1,7 @@
 [nosetests]
+with-randomly=True
 with-xvfb=True
 with-id=True
-with-xtraceback=True
 with-coverage=True
 cover-html=True
 cover-xml=True

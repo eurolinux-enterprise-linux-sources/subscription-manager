@@ -1,11 +1,11 @@
-.TH RCT 8 - - "RHSM Certificate Tool"
+.TH RCT 8 "" "" "RHSM Certificate Tool"
 .SH NAME
 rct \- Displays information (headers) about or size and statistics of a entitlement, product, or identity certificate used by Red Hat Subscription Manager.
 
 .SH SYNOPSIS
 rct cat-cert [--no-content] [--no-products] /path/to/certificate.pem
 rct stat-cert /path/to/certificate.pem
-rct cat-manifest /path/to/consumer_export.zip
+rct cat-manifest [--no-content] /path/to/consumer_export.zip
 rct dump-manifest  [--destination /path] [--force] /path/to/consumer_export.zip
 
 .SH DESCRIPTION
@@ -24,7 +24,7 @@ Prints the information that is contained in the certificate itself, such as the 
 
 .TP
 .B cat-manifest
-Prints the information that is contained in the subscription service manifest. The manifest is an archive of JSON files which contain all of the subscription information for subscriptions allocated to the on-premise service.
+Prints the information that is contained in the subscription service manifest. The manifest is an archive of JSON files which contain all of the subscription information for subscriptions allocated to the on-premise service. The \fB--no-content\fP option can be used to reduce the detail shown in the output.
 
 .TP
 .B dump-manifest
@@ -276,6 +276,10 @@ A subscription management service is allocated a specific bloc of subscriptions 
 There are multiple JSON files in the archive, identifying different aspects of the subscription service and subscription configuration, such as the general manifest properties, subscription information, content and repository information, and product information.
 
 .SS OPTIONS
+.TP
+.B --no-content
+Excludes all of the \fBContent Sets\fP sections, which significantly reduces the information printed to stdout.
+
 .TP
 .I /path/to/consumer_export.zip
 Gives the path and filename (by default, \fBconsumer_export.zip\fP) for the manifest file on the local system. This is required.

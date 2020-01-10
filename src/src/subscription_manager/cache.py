@@ -24,7 +24,7 @@ import logging
 import os
 import socket
 import threading
-from M2Crypto import SSL
+from rhsm.https import ssl
 
 from rhsm.config import initConfig
 import rhsm.connection as connection
@@ -34,7 +34,7 @@ from subscription_manager.jsonwrapper import PoolWrapper
 from rhsm import ourjson as json
 
 _ = gettext.gettext
-log = logging.getLogger('rhsm-app.' + __name__)
+log = logging.getLogger(__name__)
 
 PACKAGES_RESOURCE = "packages"
 
@@ -198,7 +198,7 @@ class StatusCache(CacheManager):
             self.write_cache()
             self.last_error = False
             return self.server_status
-        except SSL.SSLError, ex:
+        except ssl.SSLError as ex:
             log.exception(ex)
             self.last_error = ex
             log.error("Consumer certificate is invalid")

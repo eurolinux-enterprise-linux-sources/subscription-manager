@@ -5,7 +5,6 @@ import logging
 
 _ = lambda x: gettext.ldgettext("rhsm", x)
 
-
 from subscription_manager import ga_loader
 ga_loader.init_ga()
 
@@ -16,13 +15,11 @@ gtk_compat.threads_init()
 
 import rhsm
 
-sys.path.append("/usr/share/rhsm")
-
 # enable logging for firstboot
 from subscription_manager import logutil
 logutil.init_logger()
 
-log = logging.getLogger("rhsm-app." + __name__)
+log = logging.getLogger(__name__)
 
 # neuter linkify in firstboot
 from subscription_manager.gui.utils import running_as_firstboot
@@ -77,7 +74,8 @@ class moduleClass(module.Module, object):
         reg_info = registergui.RegisterInfo()
         self.backend = managergui.Backend()
         self.plugin_manager = inj.require(inj.PLUGIN_MANAGER)
-        self.register_widget = registergui.RegisterWidget(self.backend, Facts(), reg_info)
+        self.register_widget = registergui.FirstbootWidget(self.backend, Facts(), reg_info)
+        self.register_widget.connect("notify::screen-ready", self._on_screen_ready_change)
 
         # Will be False if we are on an older RHEL version where
         # rhn-client-tools already does some things so we don't have to.
@@ -103,11 +101,16 @@ class moduleClass(module.Module, object):
         self._registration_finished = False
 
         self.interface = None
+        self.finished = False
 
         self.proxies_were_enabled_from_gui = None
         self._apply_result = constants.RESULT_FAILURE
 
         self.page_status = constants.RESULT_FAILURE
+
+    def _on_screen_ready_change(self, obj, param):
+        ready = self.register_widget.current_screen.get_property('ready')
+        self._set_navigation_sensitive(ready)
 
     def apply(self, interface, testing=False):
         """
@@ -133,12 +136,13 @@ class moduleClass(module.Module, object):
 
         self.register_widget.connect('finished', self.on_finished)
         self.register_widget.connect('register-error', self.on_register_error)
+        self.register_widget.connect('register-message', self.on_register_message)
 
         # In firstboot, we leverage the RHN setup proxy settings already
         # presented to the user, so hide the choose server screen's proxy
         # text and button. But, if we are standalone, show our versions.
-        if not self.standalone and False:
-            screen = self._screens[registergui.CHOOSE_SERVER_PAGE]
+        if not self.standalone:
+            screen = self.register_widget._screens[registergui.CHOOSE_SERVER_PAGE]
             screen.proxy_frame.destroy()
 
     def focus(self):
@@ -155,11 +159,17 @@ class moduleClass(module.Module, object):
         # Need to make sure that each time the UI is initialized we reset back
         # to the main register screen.
 
+        if self.finished:
+            self.register_widget.done()
+            return
+
         # Note, even if we are standalone firstboot mode (no rhn modules),
         # we may still have RHN installed, and possibly configured.
         self._read_rhn_proxy_settings()
 
         self.register_widget.initialize()
+        # Make sure to show the unregister screen
+        self.register_widget.info.set_property('enable-unregister', True)
 
     def needsNetwork(self):
         """
@@ -204,6 +214,10 @@ class moduleClass(module.Module, object):
         identity = inj.require(inj.IDENTITY)
         return not identity.is_valid()
 
+    def on_register_message(self, obj, msg, message_type=None):
+        message_type = message_type or ga_Gtk.MessageType.ERROR
+        self.error_dialog(msg, message_type=message_type)
+
     def on_register_error(self, obj, msg, exc_list):
         self.page_status = constants.RESULT_FAILURE
 
@@ -223,11 +237,22 @@ class moduleClass(module.Module, object):
         self.error_dialog(msg)
 
     def handle_register_exception(self, obj, msg, exc_info):
+        # We are checking to see if exc_info seems to have come from
+        # a call to sys.exc_info()
+        # (likely somewhere in registergui.AsyncBackend)
+        # See bz 1395662 for more info
+        if isinstance(exc_info, tuple) and \
+           isinstance(exc_info[1], registergui.RemoteUnregisterException):
+            # Don't show a message box when we cannot unregister from the server
+            # Instead log the exception
+            log.exception(exc_info[1])
+            return
         message = format_exception(exc_info, msg)
         self.error_dialog(message)
 
-    def error_dialog(self, text):
-        dlg = ga_Gtk.MessageDialog(None, 0, ga_Gtk.MessageType.ERROR,
+    def error_dialog(self, text, message_type=None):
+        message_type = message_type or ga_Gtk.MessageType.ERROR
+        dlg = ga_Gtk.MessageDialog(None, 0, message_type,
                                    ga_Gtk.ButtonsType.OK, text)
         dlg.set_markup(text)
         dlg.set_skip_taskbar_hint(True)
