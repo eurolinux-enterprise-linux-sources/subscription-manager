@@ -1,0 +1,8 @@
+[run]
+branch = True
+source = subscription_manager
+         rct
+         rhsm_debug
+         content_plugins
+[report]
+include = src/*

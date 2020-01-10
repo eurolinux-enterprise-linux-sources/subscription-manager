@@ -1,0 +1,78 @@
+.TH rhsm-debug 8
+.SH NAME
+rhsm-debug \- Compiles information about system's entitlements, products, and identity used by Red Hat Subscription Manager.
+
+.SH SYNOPSIS
+rhsm-debug
+.I module [options]
+
+.SH DESCRIPTION
+.B rhsm-debug
+compiles information about system's entitlements, products, and identity used by Red Hat Subscription Manager.
+
+.PP
+
+.SH COMMANDS AND OPTIONS
+.B rhsm-debug
+has specific options available for each module, depending on what operation is being performed. The currently supported modules are:
+
+.IP
+1. system
+
+
+.SS COMMON OPTIONS
+.TP
+.B -h, --help
+Prints the specific help information for the given command.
+
+.TP
+.B --proxy=PROXY
+Uses an HTTP proxy. The
+.I PROXY
+name has the format
+.I hostname:port.
+
+
+.TP
+.B --proxyuser=PROXYUSERNAME
+Gives the username to use to authenticate to the HTTP proxy.
+
+.TP
+.B --proxypassword=PROXYPASSWORD
+Gives the password to use to authenticate to the HTTP proxy.
+
+
+.SS SYSTEM OPTIONS
+The
+.B system
+command pulls in debug information off of the current system
+
+.TP
+.B --destination=DESTINATION
+The directory to place the resulting debug data. The default is /tmp.
+
+.TP
+.B --no-archive
+Generates an uncompressed directory intead of a gzipped file.
+
+.TP
+.B --sos
+Excludes data files that are also collected by the sosreport tool.
+
+.TP
+.B --no-subscriptions
+Excludes the gathering of subscription information. This is the default.
+
+.TP
+.B --subscriptions
+Includes the gathering of subscription information. This includes subscriptions available for this system and organization.
+
+.SH BUGS
+This tool is part of Red Hat Subscription Manager. To file bugs against this command-line tool, go to <https://bugzilla.redhat.com>, and select Red Hat > Red Hat Enterprise Linux > subscription-manager.
+
+
+.SH AUTHORS
+William Poteat<wpoteat@redhat.com>. The rhsm-debug tool was written by William Poteat.
+
+.SH COPYRIGHT
+Copyright (c) 2012 Red Hat, Inc. This is licensed under the GNU General Public License, version 2 (GPLv2). A copy of this license is available at http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
